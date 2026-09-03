@@ -25,106 +25,150 @@ export default function PlayerPage() {
   const upNext = useMemo(() => {
     if (!series || !episode) return [];
     const all = db.episodes.findBySeries(series.id);
-    return all.filter((e) => e.published && e.order > episode.order).sort((a, b) => a.order - b.order);
+    return all
+      .filter((e) => e.published && e.order > episode.order)
+      .sort((a, b) => a.order - b.order);
   }, [series, episode]);
 
   if (!episode || !series) {
     return (
-      <div className="app-shell flex min-h-[100dvh] flex-col items-center justify-center bg-[#0A1F17] p-8 text-center text-warm-white">
+      <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-[#0A1F17] p-8 text-center text-warm-white">
         <p className="text-[14px] text-muted">Episode not found.</p>
-        <button onClick={() => navigate(-1)} className="mt-4 rounded-xl bg-gold px-4 py-2 text-[12px] font-bold text-deep-green">
+        <button
+          onClick={() => navigate(-1)}
+          className="mt-4 rounded-xl bg-gold px-4 py-2 text-[12px] font-bold text-deep-green"
+        >
           ← Back
         </button>
       </div>
     );
   }
 
+  const seriesTitle = pick(lang, series.titleSw, series.title);
+  const episodeTitle = pick(lang, episode.titleSw, episode.title);
+
   return (
-    <div className="app-shell flex min-h-[100dvh] flex-col bg-[#0A1F17] text-warm-white">
-      <div className="w-full max-w-4xl mx-auto flex flex-col flex-1 px-2 sm:px-4 md:px-6">
-        <div className="flex items-center justify-between px-2 pt-3 md:pt-5 text-[13px]">
-          <button
-            onClick={() => navigate(-1)}
-            className="cursor-pointer text-warm-white p-1 hover:text-gold transition text-lg"
-            aria-label="Back"
-          >
-            ↓
-          </button>
-          <Link to={`/series/${series.slug}`} className="text-gold-light font-bold hover:underline text-sm md:text-base">
-            {pick(lang, series.titleSw, series.title)}
-          </Link>
-          <span className="w-4" />
-        </div>
+    // Full-page dark shell — no scroll on the shell itself
+    <div className="flex min-h-[100dvh] flex-col bg-[#0A1F17] text-warm-white">
 
-        <div className="mt-2 w-full rounded-2xl overflow-hidden shadow-2xl">
-          <MediaPlayer
-            key={episode.id}
-            episodeId={episode.id}
-            mediaUrl={episode.mediaUrl}
-            mediaType={episode.mediaType}
-            poster={series.image}
-            initialPosition={initialPosition}
-            onCompleted={() => {
-              if (upNext[0]) navigate(`/player/${upNext[0].id}`);
-            }}
-          />
-        </div>
+      {/* ── TOP NAV BAR ── */}
+      <div className="flex-shrink-0 flex items-center gap-3 px-3 sm:px-5 py-2.5 border-b border-white/8">
+        <button
+          onClick={() => navigate(-1)}
+          className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-white/8 hover:bg-white/15 text-warm-white/80 hover:text-warm-white transition active:scale-95"
+          aria-label="Back"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+        </button>
+        <Link
+          to={`/series/${series.slug}`}
+          className="flex-1 min-w-0 text-[12px] sm:text-[13px] font-bold text-gold-light hover:text-gold transition truncate"
+        >
+          {seriesTitle}
+        </Link>
+      </div>
 
-        <div className="px-3 sm:px-4 py-4">
-          <div className="text-[9.5px] md:text-xs font-extrabold uppercase tracking-[0.06em] text-gold-light">
-            {pick(lang, series.titleSw, series.title)} · {t("episode")}{" "}
-            {String(episode.order).padStart(2, "0")}
-          </div>
-          <h1 className="mt-1.5 font-display text-[17px] sm:text-xl font-bold text-warm-white">
-            {pick(lang, episode.titleSw, episode.title)}
-          </h1>
-        </div>
+      {/* ── VIDEO / AUDIO PLAYER ──
+           w-full with no padding → touches both edges exactly like YouTube.
+           aspect-ratio is enforced inside MediaPlayer for VIDEO.
+           For mobile the whole width is used; on wide desktop we cap it sensibly.
+      ── */}
+      <div className="flex-shrink-0 w-full bg-black">
+        <MediaPlayer
+          key={episode.id}
+          episodeId={episode.id}
+          mediaUrl={episode.mediaUrl}
+          mediaType={episode.mediaType}
+          poster={series.image}
+          initialPosition={initialPosition}
+          onCompleted={() => {
+            if (upNext[0]) navigate(`/player/${upNext[0].id}`);
+          }}
+        />
+      </div>
 
-        <div className="flex gap-5 border-b border-white/10 px-3 sm:px-4">
-          <button
-            onClick={() => setTab("next")}
-            className={`cursor-pointer pb-2.5 text-[11px] md:text-xs font-bold transition ${
-              tab === "next" ? "border-b-2 border-gold text-gold-light" : "text-muted hover:text-warm-white"
-            }`}
-          >
-            {t("upNext")}
-          </button>
-          <button
-            onClick={() => setTab("about")}
-            className={`cursor-pointer pb-2.5 text-[11px] md:text-xs font-bold transition ${
-              tab === "about" ? "border-b-2 border-gold text-gold-light" : "text-muted hover:text-warm-white"
-            }`}
-          >
-            {t("about")}
-          </button>
-        </div>
+      {/* ── SCROLLABLE CONTENT BELOW PLAYER ── */}
+      <div className="flex-1 overflow-y-auto min-h-0">
+        <div className="max-w-4xl mx-auto w-full">
 
-        {tab === "next" ? (
-          <div className="flex flex-col gap-2.5 px-3 sm:px-4 py-4 pb-12">
-            {upNext.length === 0 && (
-              <p className="text-[12px] text-muted">
-                {lang === "sw" ? "Hiki ndicho kipindi cha mwisho." : "This is the last episode."}
+          {/* Episode title + meta */}
+          <div className="px-4 sm:px-6 pt-4 pb-3 border-b border-white/8">
+            <p className="text-[9.5px] sm:text-[10.5px] font-extrabold uppercase tracking-[0.07em] text-gold-light">
+              {seriesTitle} &middot; {t("episode")} {String(episode.order).padStart(2, "0")}
+            </p>
+            <h1 className="mt-1 font-display text-[17px] sm:text-xl font-bold text-warm-white leading-snug">
+              {episodeTitle}
+            </h1>
+            {episode.durationSec > 0 && (
+              <p className="mt-1 text-[10px] text-muted font-medium">
+                {fmtDuration(episode.durationSec)}
               </p>
             )}
-            {upNext.map((e) => (
-              <Link key={e.id} to={`/player/${e.id}`} className="group flex items-center gap-3 p-2 rounded-xl hover:bg-white/5 transition">
-                <span className="flex h-[38px] w-[50px] flex-none items-center justify-center rounded-lg bg-gradient-to-br from-teal-light to-deep-green text-[11px] font-bold text-white shadow-xs group-hover:from-gold group-hover:to-gold-light group-hover:text-deep-green transition">
-                  {e.order}
-                </span>
-                <span>
-                  <span className="block text-[11.5px] md:text-xs font-bold text-warm-white group-hover:text-gold-light transition">
-                    {String(e.order).padStart(2, "0")} · {pick(lang, e.titleSw, e.title)}
-                  </span>
-                  <span className="block text-[9px] md:text-[10px] text-muted">{fmtDuration(e.durationSec)}</span>
-                </span>
-              </Link>
+          </div>
+
+          {/* Tabs */}
+          <div className="flex gap-5 px-4 sm:px-6 border-b border-white/8">
+            {(["next", "about"] as const).map((key) => (
+              <button
+                key={key}
+                onClick={() => setTab(key)}
+                className={`py-3 text-[11px] sm:text-xs font-bold transition cursor-pointer border-b-2 -mb-px ${
+                  tab === key
+                    ? "border-gold text-gold-light"
+                    : "border-transparent text-muted hover:text-warm-white"
+                }`}
+              >
+                {key === "next" ? t("upNext") : t("about")}
+              </button>
             ))}
           </div>
-        ) : (
-          <div className="px-3 sm:px-4 py-4 text-[12px] md:text-sm leading-relaxed text-[#B9B192] pb-12">
-            {pick(lang, series.descriptionSw, series.description)}
+
+          {/* Tab content */}
+          <div className="px-4 sm:px-6 py-4 pb-16">
+            {tab === "next" ? (
+              upNext.length === 0 ? (
+                <p className="text-[12px] text-muted py-4">
+                  {lang === "sw" ? "Hiki ndicho kipindi cha mwisho." : "This is the last episode."}
+                </p>
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  {upNext.map((e) => (
+                    <Link
+                      key={e.id}
+                      to={`/player/${e.id}`}
+                      className="group flex items-center gap-3 rounded-xl p-2 hover:bg-white/6 transition"
+                    >
+                      {/* Thumbnail / order badge */}
+                      <div className="flex h-10 w-14 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-teal/60 to-deep-green text-[11px] font-bold text-warm-white shadow-sm group-hover:from-gold/80 group-hover:to-gold group-hover:text-deep-green transition">
+                        {String(e.order).padStart(2, "0")}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[12px] sm:text-[13px] font-bold text-warm-white group-hover:text-gold-light transition line-clamp-1">
+                          {pick(lang, e.titleSw, e.title)}
+                        </p>
+                        <p className="text-[9.5px] sm:text-[10.5px] text-muted mt-0.5">
+                          {fmtDuration(e.durationSec)}
+                        </p>
+                      </div>
+                      {/* Play icon */}
+                      <div className="flex-shrink-0 text-muted group-hover:text-gold transition">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M8 5v14l11-7z" />
+                        </svg>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              )
+            ) : (
+              <p className="text-[13px] sm:text-sm leading-relaxed text-[#B9B192]">
+                {pick(lang, series.descriptionSw, series.description)}
+              </p>
+            )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
