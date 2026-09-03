@@ -19,109 +19,93 @@ export interface SlideItem {
   };
 }
 
-const INTERVAL = 3000; // ms per slide
+const INTERVAL = 3200; // ms — always advances, regardless of hover
 
 export default function HomeHeroSlideshow({ items }: { items: SlideItem[] }) {
   const { lang } = useLang();
   const navigate = useNavigate();
 
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [direction, setDirection] = useState<"next" | "prev">("next");
-  const [animKey, setAnimKey] = useState(0);
-  const [likedMap, setLikedMap] = useState<Record<string, boolean>>({});
-  // Progress through current slide [0-100]
-  const [progress, setProgress] = useState(0);
+  const [direction, setDirection]       = useState<"next" | "prev">("next");
+  const [animKey, setAnimKey]           = useState(0);
+  const [progress, setProgress]         = useState(0);
+  const [likedMap, setLikedMap]         = useState<Record<string, boolean>>({});
 
-  const total = items.length;
-  const timerRef = useRef<number | null>(null);
-  const progressRef = useRef<number | null>(null);
-  const isPausedRef = useRef(false); // ref so timer callbacks always read latest value
-  const startTimeRef = useRef<number>(Date.now());
+  const total         = items.length;
+  const intervalRef   = useRef<number | null>(null);
+  const rafRef        = useRef<number | null>(null);
+  const slideStartRef = useRef<number>(Date.now());
+  // currentIndex as a ref so RAF callback always reads the latest value
+  const indexRef      = useRef(0);
+  useEffect(() => { indexRef.current = currentIndex; }, [currentIndex]);
 
-  const clearTimers = useCallback(() => {
-    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
-    if (progressRef.current) { cancelAnimationFrame(progressRef.current); progressRef.current = null; }
+  // ── helpers ───────────────────────────────────────────────────────────────
+
+  const stopAll = useCallback(() => {
+    if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
+    if (rafRef.current)      { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
   }, []);
 
+  /** Animate the progress bar for the current slide */
+  const startProgressRAF = useCallback(() => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    slideStartRef.current = Date.now();
+
+    const frame = () => {
+      const elapsed = Date.now() - slideStartRef.current;
+      const pct = Math.min(100, (elapsed / INTERVAL) * 100);
+      setProgress(pct);
+      if (pct < 100) rafRef.current = requestAnimationFrame(frame);
+    };
+    rafRef.current = requestAnimationFrame(frame);
+  }, []);
+
+  /** Advance to a specific index and restart timing */
   const goTo = useCallback((idx: number, dir: "next" | "prev") => {
     setDirection(dir);
     setCurrentIndex(idx);
     setAnimKey((k) => k + 1);
     setProgress(0);
-    startTimeRef.current = Date.now();
-  }, []);
+    startProgressRAF();
+  }, [startProgressRAF]);
 
-  // Tick: update progress bar every frame
-  const tick = useCallback(() => {
-    if (isPausedRef.current) {
-      progressRef.current = requestAnimationFrame(tick);
-      return;
-    }
-    const elapsed = Date.now() - startTimeRef.current;
-    const pct = Math.min(100, (elapsed / INTERVAL) * 100);
-    setProgress(pct);
-    if (pct < 100) {
-      progressRef.current = requestAnimationFrame(tick);
-    }
-  }, []);
-
-  // Schedule next slide after INTERVAL
-  const scheduleNext = useCallback(() => {
-    clearTimers();
-    startTimeRef.current = Date.now();
-    setProgress(0);
-    progressRef.current = requestAnimationFrame(tick);
-    timerRef.current = window.setTimeout(() => {
-      if (!isPausedRef.current) {
-        setCurrentIndex((prev) => {
-          const next = (prev + 1) % total;
-          setDirection("next");
-          setAnimKey((k) => k + 1);
-          setProgress(0);
-          startTimeRef.current = Date.now();
-          return next;
-        });
-        scheduleNext();
-      } else {
-        // Check again after a short delay when paused
-        timerRef.current = window.setTimeout(scheduleNext, 200);
-      }
+  /** Start the auto-advance interval — always runs, never pauses */
+  const startInterval = useCallback(() => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    intervalRef.current = window.setInterval(() => {
+      const next = (indexRef.current + 1) % total;
+      goTo(next, "next");
     }, INTERVAL);
-  }, [clearTimers, tick, total]);
+  }, [goTo, total]);
 
-  // Start on mount, restart when total changes
+  // Mount / total change: kick off interval + progress bar
   useEffect(() => {
     if (total <= 1) return;
-    scheduleNext();
-    return clearTimers;
-  }, [total]); // eslint-disable-line react-hooks/exhaustive-deps
+    startProgressRAF();
+    startInterval();
+    return stopAll;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [total]);
 
-  function handleMouseEnter() { isPausedRef.current = true; }
-  function handleMouseLeave() {
-    isPausedRef.current = false;
-    // Reset the start time so progress continues from where it was
-    startTimeRef.current = Date.now() - (progress / 100) * INTERVAL;
-  }
+  // ── user interactions ─────────────────────────────────────────────────────
 
   function handleNext() {
-    isPausedRef.current = false;
-    clearTimers();
+    stopAll();
     goTo((currentIndex + 1) % total, "next");
-    scheduleNext();
+    startInterval();
   }
 
   function handlePrev() {
-    isPausedRef.current = false;
-    clearTimers();
+    stopAll();
     goTo((currentIndex - 1 + total) % total, "prev");
-    scheduleNext();
+    startInterval();
   }
 
   function handleDotClick(idx: number) {
-    isPausedRef.current = false;
-    clearTimers();
+    if (idx === currentIndex) return;
+    stopAll();
     goTo(idx, idx > currentIndex ? "next" : "prev");
-    scheduleNext();
+    startInterval();
   }
 
   function handleLike(e: React.MouseEvent, seriesId: string) {
@@ -133,56 +117,53 @@ export default function HomeHeroSlideshow({ items }: { items: SlideItem[] }) {
 
   if (!items || total === 0) return null;
 
-  const currentSlide = items[currentIndex];
+  // ── render ────────────────────────────────────────────────────────────────
 
   return (
-    <section
-      className="relative w-full px-4 sm:px-5 md:px-10 lg:px-16 pt-3 sm:pt-4 md:pt-6 pb-1"
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
-    >
+    <section className="relative w-full px-4 sm:px-5 md:px-10 lg:px-16 pt-3 sm:pt-4 md:pt-6 pb-1">
       <div className="max-w-7xl mx-auto relative">
 
-        {/* ── Prev arrow ── */}
+        {/* Prev arrow */}
         <button
           onClick={handlePrev}
           aria-label="Previous"
           className="absolute left-0.5 sm:left-1 top-1/2 -translate-y-1/2 z-20
-            flex h-8 w-8 sm:h-9 sm:w-9 md:h-10 md:w-10 items-center justify-center
+            flex h-8 w-8 sm:h-9 sm:w-9 md:h-11 md:w-11 items-center justify-center
             rounded-full bg-black/40 text-white/90 border border-white/15
             backdrop-blur-sm shadow-lg cursor-pointer
-            transition-all duration-150 hover:bg-gold hover:text-deep-green hover:scale-105 active:scale-95"
+            transition-all duration-150 hover:bg-gold hover:text-deep-green hover:scale-110 active:scale-95"
         >
           <ChevronLeft size={17} />
         </button>
 
-        {/* ── Next arrow ── */}
+        {/* Next arrow */}
         <button
           onClick={handleNext}
           aria-label="Next"
           className="absolute right-0.5 sm:right-1 top-1/2 -translate-y-1/2 z-20
-            flex h-8 w-8 sm:h-9 sm:w-9 md:h-10 md:w-10 items-center justify-center
+            flex h-8 w-8 sm:h-9 sm:w-9 md:h-11 md:w-11 items-center justify-center
             rounded-full bg-black/40 text-white/90 border border-white/15
             backdrop-blur-sm shadow-lg cursor-pointer
-            transition-all duration-150 hover:bg-gold hover:text-deep-green hover:scale-105 active:scale-95"
+            transition-all duration-150 hover:bg-gold hover:text-deep-green hover:scale-110 active:scale-95"
         >
           <ChevronRight size={17} />
         </button>
 
-        {/* ── Slide viewport ── */}
-        <div className="relative h-[180px] sm:h-[230px] md:h-[300px] lg:h-[360px] overflow-hidden rounded-2xl md:rounded-3xl shadow-xl">
+        {/* Viewport */}
+        <div className="relative h-[180px] sm:h-[230px] md:h-[300px] lg:h-[360px]
+          overflow-hidden rounded-2xl md:rounded-3xl shadow-xl">
           <SlideCard
             key={animKey}
-            item={currentSlide}
+            item={items[currentIndex]}
             lang={lang}
             navigate={navigate}
             direction={direction}
-            isLiked={likedMap[currentSlide.series.id]}
-            onLike={(e) => handleLike(e, currentSlide.series.id)}
+            isLiked={likedMap[items[currentIndex].series.id]}
+            onLike={(e) => handleLike(e, items[currentIndex].series.id)}
           />
         </div>
 
-        {/* ── Dots with animated progress bar ── */}
+        {/* Dots with live progress bar */}
         <div className="mt-3 md:mt-4 flex items-center justify-center gap-2">
           {items.map((item, idx) => {
             const isActive = idx === currentIndex;
@@ -191,16 +172,17 @@ export default function HomeHeroSlideshow({ items }: { items: SlideItem[] }) {
                 key={item.series.id}
                 onClick={() => handleDotClick(idx)}
                 aria-label={`Slide ${idx + 1}`}
-                className={`relative overflow-hidden rounded-full cursor-pointer transition-all duration-300 ${
+                className={`relative overflow-hidden rounded-full cursor-pointer
+                  transition-all duration-300 ${
                   isActive
-                    ? "w-8 sm:w-10 md:w-12 h-1.5 bg-white/25"
-                    : "w-1.5 h-1.5 bg-white/30 hover:bg-white/60"
+                    ? "w-8 sm:w-10 md:w-12 h-1.5 md:h-2 bg-white/20"
+                    : "w-1.5 md:w-2 h-1.5 md:h-2 bg-white/30 hover:bg-white/60"
                 }`}
               >
                 {isActive && (
                   <span
                     className="absolute inset-y-0 left-0 rounded-full bg-gold"
-                    style={{ width: `${progress}%`, transition: "width 0.05s linear" }}
+                    style={{ width: `${progress}%` }}
                   />
                 )}
               </button>
@@ -215,12 +197,7 @@ export default function HomeHeroSlideshow({ items }: { items: SlideItem[] }) {
 // ── SlideCard ────────────────────────────────────────────────────────────────
 
 function SlideCard({
-  item,
-  lang,
-  navigate,
-  direction,
-  isLiked,
-  onLike,
+  item, lang, navigate, direction, isLiked, onLike,
 }: {
   item: SlideItem;
   lang: Lang;
@@ -230,7 +207,7 @@ function SlideCard({
   onLike: (e: React.MouseEvent) => void;
 }) {
   const { series, firstEpisodeId, badgeLabel } = item;
-  const title = pick(lang, series.titleSw, series.title);
+  const title       = pick(lang, series.titleSw,       series.title);
   const description = pick(lang, series.descriptionSw, series.description);
 
   function handlePlay(e: React.MouseEvent) {
@@ -242,9 +219,6 @@ function SlideCard({
     navigate(`/series/${series.slug}`);
   }
 
-  // Direction-aware slide animation via inline style
-  const animClass = direction === "next" ? "slide-enter-right" : "slide-enter-left";
-
   return (
     <div
       onClick={() => navigate(`/series/${series.slug}`)}
@@ -252,8 +226,8 @@ function SlideCard({
         rounded-2xl md:rounded-3xl
         bg-gradient-to-br from-deep-green via-teal to-[#0B251D]
         p-3 sm:p-5 md:p-8 flex flex-col justify-between
-        shadow-md border border-white/10 text-warm-white
-        ${animClass}`}
+        border border-white/8 text-warm-white
+        ${direction === "next" ? "slide-enter-right" : "slide-enter-left"}`}
     >
       {/* Background artwork */}
       {series.image ? (
@@ -265,18 +239,19 @@ function SlideCard({
               opacity-40 mix-blend-luminosity
               transition-transform duration-700 group-hover:scale-105"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-deep-green/95 via-deep-green/55 to-transparent" />
-          <div className="hidden md:block absolute inset-0 bg-gradient-to-r from-deep-green/80 via-deep-green/30 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#071912]/95 via-[#071912]/50 to-transparent" />
+          <div className="hidden md:block absolute inset-0 bg-gradient-to-r from-[#071912]/80 via-[#071912]/25 to-transparent" />
         </>
       ) : (
-        <div className="absolute right-6 top-6 opacity-20 pointer-events-none">
-          <KhatamStar size={90} className="text-gold-light" />
+        <div className="absolute right-6 top-6 opacity-15 pointer-events-none">
+          <KhatamStar size={100} className="text-gold-light" />
         </div>
       )}
 
       {/* Top row */}
       <div className="relative z-10 flex items-center justify-between">
-        <span className="rounded-lg bg-gold px-2.5 py-0.5 text-[8px] sm:text-[9.5px] md:text-[11px]
+        <span className="rounded-lg bg-gold px-2.5 py-0.5
+          text-[8px] sm:text-[9.5px] md:text-[11px]
           font-extrabold tracking-widest text-deep-green uppercase shadow">
           {badgeLabel || "QISAS ORIGINAL"}
         </span>
@@ -285,7 +260,9 @@ function SlideCard({
           aria-label="Like"
           className={`flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-full
             backdrop-blur-sm border border-white/20 transition active:scale-90 cursor-pointer ${
-            isLiked ? "bg-rose-600 text-white" : "bg-black/35 text-white/80 hover:text-white hover:bg-black/55"
+            isLiked
+              ? "bg-rose-600 text-white"
+              : "bg-black/35 text-white/80 hover:text-white hover:bg-black/55"
           }`}
         >
           <Heart size={13} fill={isLiked ? "currentColor" : "none"} />
@@ -294,25 +271,26 @@ function SlideCard({
 
       {/* Bottom content */}
       <div className="relative z-10 flex flex-col gap-1 md:gap-2 max-w-2xl">
-        <div className="flex items-center gap-2 text-[9px] sm:text-[10px] md:text-xs text-gold-light/90 font-semibold">
+        <div className="flex items-center gap-1.5 sm:gap-2
+          text-[9px] sm:text-[10px] md:text-xs text-gold-light/90 font-semibold">
           <span className="flex items-center gap-1">
             <Eye size={10} />
             {series.views ? `${(series.views / 1000).toFixed(1)}k` : "Maarufu"}
           </span>
-          <span className="opacity-50">·</span>
+          <span className="opacity-40">·</span>
           <span>{item.episodeCount ?? 8} {lang === "sw" ? "Vipindi" : "Eps"}</span>
         </div>
 
         <h3 className="font-display text-[16px] sm:text-2xl md:text-[32px] font-bold
           text-warm-white leading-tight line-clamp-1
-          drop-shadow-[0_2px_8px_rgba(0,0,0,0.5)]
+          drop-shadow-[0_2px_10px_rgba(0,0,0,0.6)]
           group-hover:text-gold-light transition duration-200">
           {title}
         </h3>
 
         {description && (
-          <p className="hidden sm:block text-[10px] md:text-[13px] text-warm-white/75
-            line-clamp-2 leading-relaxed max-w-lg">
+          <p className="hidden sm:block text-[10px] md:text-[13px]
+            text-warm-white/70 line-clamp-2 leading-relaxed max-w-lg">
             {description}
           </p>
         )}
@@ -323,7 +301,7 @@ function SlideCard({
             className="flex items-center gap-1.5 rounded-full bg-gold hover:bg-gold-light
               text-deep-green px-3 sm:px-5 py-1 sm:py-1.5 md:py-2
               text-[10px] sm:text-[11px] md:text-xs font-extrabold
-              shadow transition active:scale-95 cursor-pointer"
+              shadow-md transition active:scale-95 cursor-pointer"
           >
             <Play size={11} fill="currentColor" />
             <span>{lang === "sw" ? "Tazama" : "Play Now"}</span>
@@ -331,7 +309,8 @@ function SlideCard({
 
           <button
             onClick={handleInfo}
-            className="flex items-center gap-1 rounded-full bg-white/12 hover:bg-white/22
+            className="flex items-center gap-1 rounded-full
+              bg-white/12 hover:bg-white/22
               text-warm-white border border-white/25
               px-2.5 sm:px-4 py-1 sm:py-1.5 md:py-2
               text-[10px] sm:text-[11px] md:text-xs font-bold
