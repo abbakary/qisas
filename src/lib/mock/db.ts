@@ -37,15 +37,6 @@ export type {
   Favorite,
 };
 
-function withHost<T>(row: T, keys: string[]): T {
-  const next: Record<string, unknown> = { ...(row as Record<string, unknown>) };
-  for (const key of keys) {
-    const value = next[key];
-    if (typeof value === "string" && value) next[key] = mediaUrl(value);
-  }
-  return next as T;
-}
-
 export type Store = {
   categories: Category[];
   series: Series[];
@@ -126,9 +117,20 @@ export function subscribeDb(fn: () => void) {
 
 export async function hydrate() {
   const data = await api<any>("/api/bootstrap");
-  store.categories = (data.categories || []).map((c: Category) => withHost(c, ["image"]));
-  store.series = (data.series || []).map((s: Series) => withHost(s, ["image", "backdropImage"]));
-  store.episodes = (data.episodes || []).map((e: Episode) => withHost(e, ["mediaUrl", "posterUrl"]));
+  store.categories = (data.categories || []).map((c: Category) => ({
+    ...c,
+    image: c.image ? mediaUrl(c.image) : c.image,
+  }));
+  store.series = (data.series || []).map((s: Series) => ({
+    ...s,
+    image: s.image ? mediaUrl(s.image) : s.image,
+    backdropImage: s.backdropImage ? mediaUrl(s.backdropImage) : s.backdropImage,
+  }));
+  store.episodes = (data.episodes || []).map((e: Episode) => ({
+    ...e,
+    mediaUrl: e.mediaUrl ? mediaUrl(e.mediaUrl) : e.mediaUrl,
+    posterUrl: e.posterUrl ? mediaUrl(e.posterUrl) : e.posterUrl,
+  }));
   if (Array.isArray(data.comments)) {
     store.comments = data.comments;
   }
