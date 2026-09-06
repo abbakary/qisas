@@ -83,20 +83,19 @@ export default function AuthFlow({ initialStep = "IDENTIFIER_CHECK", defaultPhon
     }
 
     setBusy(true);
-    const sent = await sendOtp(clean);
+    const check = await checkPhoneExists(clean);
     setBusy(false);
 
-    if (!sent.ok) {
-      setError(sent.error || (lang === "sw" ? "Imeshindikana kutuma nambari." : "Could not send the code."));
-      return;
+    if (check.exists && check.user) {
+      setMatchedUser({ name: check.user.name, phone: check.user.phone });
+      setStep("PASSWORD_LOGIN");
+      setPassword("");
+    } else {
+      setMatchedUser(null);
+      setStep("CREATE_ACCOUNT");
+      setPassword("");
+      setConfirmPassword("");
     }
-
-    setOtpChallengeId(sent.challengeId || "");
-    setOtpDevAny(Boolean(sent.devAcceptAny));
-    setResendIn(sent.resendIn || 45);
-    setOtpCode("");
-    setOtpTicket("");
-    setStep("OTP_VERIFY");
   }
 
   async function handleOtpSubmit(e: React.FormEvent) {
@@ -372,8 +371,8 @@ export default function AuthFlow({ initialStep = "IDENTIFIER_CHECK", defaultPhon
               {/* Bottom guidance text matching screenshot */}
               <p className="text-center text-xs text-[#a59d81] leading-relaxed pt-1">
                 {lang === "sw"
-                  ? "Tutakutumia nambari fupi ya uthibitisho kwenye simu hii"
-                  : "We'll send a short verification code to this number"}
+                  ? "Tutaangalia kama una akaunti na kukuongoza ipasavyo"
+                  : "We'll check if you have an account and guide you accordingly"}
               </p>
             </form>
 
