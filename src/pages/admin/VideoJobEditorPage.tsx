@@ -5,6 +5,7 @@ import { fmtDuration, EPISODE_MIN_SEC, EPISODE_MAX_SEC, SERIES_MAX_EPISODES } fr
 import { estimateSeconds } from "../../lib/video/estimate";
 import { drawSceneFrame } from "../../lib/video/canvas-renderer";
 import { db, subscribeDb } from "../../lib/mock/db";
+import { episodeCoverDataUrl } from "../../lib/media/episode-cover";
 
 const VOICES = [
   { id: "sw-TZ-DaudiNeural", label: "Daudi (Swahili - Tanzania, Male)" },
@@ -118,7 +119,11 @@ export default function VideoJobEditorPage() {
       db.videoJobs.update(job.id, {
         status: "READY",
         outputUrl: "/media/seed/placeholder.wav",
-        posterUrl: series?.image ?? null,
+        posterUrl: episodeCoverDataUrl({
+          order: (series ? db.episodes.findBySeries(series.id).length : 0) + 1,
+          title: titleSw || job.titleSw,
+          seriesTitle: series?.titleSw || series?.title,
+        }),
         durationSec: Math.round(estTotal),
         logs: "Render completed successfully.\nReady for preview and publishing.",
       });

@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { db } from "../../lib/mock/db";
 import type { Scene, Motif } from "../../lib/video/types";
+import { episodeCoverDataUrl } from "../../lib/media/episode-cover";
 
 export default function NewVideoPage() {
   const navigate = useNavigate();
@@ -63,6 +64,9 @@ export default function NewVideoPage() {
     setErr(null);
 
     const selSeries = db.series.findById(seriesId);
+    const nextOrder =
+      Math.max(0, ...db.episodes.findBySeries(seriesId).map((e) => e.order)) + 1;
+    const titleSw = selSeries ? `${selSeries.titleSw}: Kipindi Kipya` : "Kipindi Kipya";
     const scenes = generateStoryboard(brief || (selSeries?.descriptionSw ?? "Hadithi ya elimu na hekima"));
 
     setTimeout(() => {
@@ -71,14 +75,18 @@ export default function NewVideoPage() {
         episodeId: null,
         status: "DRAFT",
         brief: brief || (selSeries?.titleSw ?? "Story Brief"),
-        titleSw: selSeries ? `${selSeries.titleSw}: Kipindi Kipya` : "Kipindi Kipya",
+        titleSw,
         titleEn: selSeries ? `${selSeries.title}: New Episode` : "New Episode",
         storyboard: scenes,
         scriptProvider: "Browser AI Engine",
         ttsProvider: "Swahili Neural TTS",
         voice: "sw-TZ-DaudiNeural",
         outputUrl: null,
-        posterUrl: selSeries?.image ?? null,
+        posterUrl: episodeCoverDataUrl({
+          order: nextOrder,
+          title: titleSw,
+          seriesTitle: selSeries?.titleSw || selSeries?.title,
+        }),
         durationSec: target,
         logs: "Storyboard drafted.\nReady for scene editing.",
         error: null,

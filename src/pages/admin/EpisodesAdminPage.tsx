@@ -219,7 +219,7 @@ export default function EpisodesAdminPage() {
               ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-200"
               : "bg-gold/20 text-gold-dark hover:bg-gold/30"
           }`}
-          title="Click to toggle Free vs VIP locked"
+          title="Click to toggle Free vs paid unlock"
         >
           {e.isFree ? (
             <>
@@ -229,7 +229,7 @@ export default function EpisodesAdminPage() {
           ) : (
             <>
               <Lock className="h-3 w-3" />
-              <span>VIP Only</span>
+              <span>Unlock</span>
             </>
           )}
         </button>

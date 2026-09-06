@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useLang } from "../context/LanguageContext";
 import KhatamStar from "../components/KhatamStar";
 
@@ -75,21 +75,14 @@ export default function OnboardingPage() {
         </p>
 
         {last ? (
-          <Link to="/identifier-check" className="btn-primary block text-center">
-            {lang === "sw" ? "Anza Sasa · Get Started" : "Get Started"}
+          <Link to="/home" className="btn-primary block text-center">
+            {lang === "sw" ? "Endelea" : "Next"}
           </Link>
         ) : (
           <button onClick={() => setI(i + 1)} className="btn-primary">
             {lang === "sw" ? "Endelea" : "Next"}
           </button>
         )}
-
-        <div className="mt-3.5 text-center text-[12px] text-[#B9B192]">
-          {lang === "sw" ? "Una akaunti tayari? " : "Already have an account? "}
-          <Link to="/identifier-check" className="font-bold text-gold-light hover:underline">
-            {lang === "sw" ? "Ingia" : "Log in"}
-          </Link>
-        </div>
       </div>
     </div>
   );

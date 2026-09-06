@@ -47,57 +47,25 @@ export default function AdminDashboardPage() {
   const episodesCount = store.episodes.length;
   const usersCount = store.users.length;
   const pendingCommunity = store.communityUploads.filter((c) => c.status === "PENDING");
+  const recentUnlocks = db.unlocks.all().slice(0, 6);
   const recentSubs = store.subscriptions.slice(0, 5);
   const recentVideoJobs = store.videoJobs.slice(0, 4);
+  const analytics = db.monetize.analytics();
+  const kpis = analytics?.kpis;
+  const activityData = (analytics?.daily || []).slice(-7).map((d) => ({
+    day: d.label,
+    unlocks: d.unlocks,
+    sadaqah: d.sadaqah,
+    completions: d.completions,
+    revenue: d.revenueTzs,
+  }));
+  const railRevenue = analytics?.rails || [];
 
   // Category Distribution for PieChart
   const categoryData = store.categories.map((c) => ({
     name: c.nameSw,
     count: store.series.filter((s) => s.categoryId === c.id).length,
   })).filter((c) => c.count > 0);
-
-  // Revenue by Plan for BarChart
-  const planBreakdown = [
-    {
-      name: "Weekly",
-      revenue: store.subscriptions
-        .filter((s) => s.plan === "WEEKLY")
-        .reduce((sum, s) => sum + (s.amountTzs || 0), 0),
-      count: store.subscriptions.filter((s) => s.plan === "WEEKLY").length,
-    },
-    {
-      name: "Monthly",
-      revenue: store.subscriptions
-        .filter((s) => s.plan === "MONTHLY")
-        .reduce((sum, s) => sum + (s.amountTzs || 0), 0),
-      count: store.subscriptions.filter((s) => s.plan === "MONTHLY").length,
-    },
-    {
-      name: "Annual",
-      revenue: store.subscriptions
-        .filter((s) => s.plan === "ANNUAL")
-        .reduce((sum, s) => sum + (s.amountTzs || 0), 0),
-      count: store.subscriptions.filter((s) => s.plan === "ANNUAL").length,
-    },
-    {
-      name: "Lifetime VIP",
-      revenue: store.subscriptions
-        .filter((s) => s.plan === "VIP_LIFETIME")
-        .reduce((sum, s) => sum + (s.amountTzs || 0), 0),
-      count: store.subscriptions.filter((s) => s.plan === "VIP_LIFETIME").length,
-    },
-  ];
-
-  // Daily Listening Activity trend (synthetic data based on episode views & progress)
-  const activityData = [
-    { day: "Mon", listens: 240, completions: 180 },
-    { day: "Tue", listens: 310, completions: 245 },
-    { day: "Wed", listens: 420, completions: 360 },
-    { day: "Thu", listens: 390, completions: 310 },
-    { day: "Fri", listens: 580, completions: 490 },
-    { day: "Sat", listens: 640, completions: 550 },
-    { day: "Sun", listens: 720, completions: 610 },
-  ];
 
   function handleApprove(upload: CommunityUpload) {
     db.communityUploads.updateStatus(upload.id, "APPROVED");
@@ -119,17 +87,17 @@ export default function AdminDashboardPage() {
             Qisas al-Anbiyaa Administration
           </h1>
           <p className="text-[13px] text-warm-white/70 mt-1 max-w-xl">
-            Real-time management for audio series, Swahili dubbing, VIP monetization, community submissions, and AI story video generation.
+            Phase 1: free browsing, episode-1 hooks, one-time unlocks, and sadaqah sponsorship — plus catalog, community, and AI studio.
           </p>
         </div>
 
         <div className="flex items-center gap-2.5 self-start sm:self-auto">
           <Link
-            to="/admin/analytics"
+            to="/admin/monetize"
             className="flex items-center gap-1.5 bg-gold hover:bg-gold-light text-deep-green text-xs font-bold px-4 py-2 rounded-xl transition shadow-xs"
           >
             <TrendingUp className="h-3.5 w-3.5" />
-            <span>View Analytics</span>
+            <span>Unlocks & Sadaqah</span>
           </Link>
           <Link
             to="/admin/videos/new"
@@ -145,20 +113,20 @@ export default function AdminDashboardPage() {
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-6 gap-3.5">
         <StatsCard
           title="Revenue (TZS)"
-          value={`${(totalRevenue / 1000).toFixed(0)}k`}
-          subtext={`${totalRevenue.toLocaleString()} TZS total`}
+          value={`${((kpis?.revenueTzs ?? totalRevenue) / 1000).toFixed(0)}k`}
+          subtext={`${(kpis?.revenueTzs ?? totalRevenue).toLocaleString()} TZS unlocks + sadaqah`}
           icon={<CreditCard className="h-4 w-4" />}
           variant="gold"
           trend="up"
           change="+18%"
         />
         <StatsCard
-          title="Active VIPs"
-          value={activeSubs}
-          subtext="Subscribers with access"
+          title="Paid unlocks"
+          value={db.unlocks.all().filter((u) => u.kind !== "SPONSORED_GRANT").length}
+          subtext="One-time series purchases"
           icon={<Users className="h-4 w-4" />}
           trend="up"
-          change="+12%"
+          change={`${activeSubs} VIP`}
         />
         <StatsCard
           title="Series Catalog"
@@ -194,15 +162,15 @@ export default function AdminDashboardPage() {
           <div className="flex items-center justify-between pb-4 border-b border-line">
             <div>
               <h3 className="font-display text-base font-bold text-deep-green">
-                Daily Listening Activity & Completions
+                Last 7 days — unlocks, sadaqah, completions
               </h3>
               <p className="text-[11px] text-muted">
-                Engagement across mobile app listeners over the past 7 days
+                Live ledger, not a demo week. Free→unlock {kpis?.freeToUnlockRate ?? 0}% · D7 {kpis?.d7Retention ?? "—"}%
               </p>
             </div>
-            <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100 px-2.5 py-1 rounded-lg">
-              +24% this week
-            </span>
+            <Link to="/admin/analytics" className="text-[11px] font-bold text-teal hover:underline">
+              Full analytics
+            </Link>
           </div>
 
           <div className="h-64 w-full pt-4">
@@ -232,8 +200,8 @@ export default function AdminDashboardPage() {
                 <Legend iconType="circle" wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }} />
                 <Area
                   type="monotone"
-                  dataKey="listens"
-                  name="Episode Plays"
+                  dataKey="unlocks"
+                  name="Unlocks"
                   stroke="#1A4D3E"
                   fillOpacity={1}
                   fill="url(#listensGrad)"
@@ -241,10 +209,18 @@ export default function AdminDashboardPage() {
                 <Area
                   type="monotone"
                   dataKey="completions"
-                  name="Finished (100%)"
+                  name="Episode completions"
                   stroke="#D4AF37"
                   fillOpacity={1}
                   fill="url(#compGrad)"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="sadaqah"
+                  name="Sadaqah"
+                  stroke="#2D7D6F"
+                  fillOpacity={0.25}
+                  fill="#2D7D6F"
                 />
               </AreaChart>
             </ResponsiveContainer>
@@ -318,32 +294,36 @@ export default function AdminDashboardPage() {
           <div className="flex items-center justify-between pb-4 border-b border-line">
             <div>
               <h3 className="font-display text-base font-bold text-deep-green">
-                Revenue by VIP Plan
+                Revenue by payment rail
               </h3>
-              <p className="text-[11px] text-muted">Income in TZS per subscription tier</p>
+              <p className="text-[11px] text-muted">Unlock + sadaqah TZS (STK first)</p>
             </div>
-            <Link to="/admin/subscriptions" className="text-xs text-teal font-bold hover:underline">
-              All Subs
+            <Link to="/admin/analytics" className="text-xs text-teal font-bold hover:underline">
+              KPIs
             </Link>
           </div>
 
           <div className="h-60 w-full pt-4">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={planBreakdown} layout="vertical">
-                <XAxis type="number" stroke="#888" fontSize={10} tickFormatter={(v) => `${v / 1000}k`} />
-                <YAxis dataKey="name" type="category" stroke="#888" fontSize={11} width={80} />
-                <Tooltip
-                  formatter={(value: any) => [`${Number(value).toLocaleString()} TZS`, "Revenue"]}
-                  contentStyle={{
-                    backgroundColor: "#1A4D3E",
-                    borderRadius: "8px",
-                    color: "#FAF8F5",
-                    fontSize: "12px",
-                  }}
-                />
-                <Bar dataKey="revenue" fill="#D4AF37" radius={[0, 6, 6, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            {railRevenue.length === 0 ? (
+              <p className="text-xs text-muted py-12 text-center">No unlock payments yet.</p>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={railRevenue} layout="vertical">
+                  <XAxis type="number" stroke="#888" fontSize={10} tickFormatter={(v) => `${v / 1000}k`} />
+                  <YAxis dataKey="name" type="category" stroke="#888" fontSize={11} width={80} />
+                  <Tooltip
+                    formatter={(value: any) => [`${Number(value).toLocaleString()} TZS`, "Revenue"]}
+                    contentStyle={{
+                      backgroundColor: "#1A4D3E",
+                      borderRadius: "8px",
+                      color: "#FAF8F5",
+                      fontSize: "12px",
+                    }}
+                  />
+                  <Bar dataKey="revenueTzs" fill="#D4AF37" radius={[0, 6, 6, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
 
@@ -432,34 +412,31 @@ export default function AdminDashboardPage() {
         <div className="rounded-2xl border border-line bg-white p-5 shadow-xs">
           <div className="flex items-center justify-between pb-3 border-b border-line">
             <h3 className="font-display text-base font-bold text-deep-green">
-              Recent VIP Subscriptions
+              Recent unlock payments
             </h3>
-            <Link to="/admin/subscriptions" className="text-xs text-teal font-bold hover:underline">
+            <Link to="/admin/monetize" className="text-xs text-teal font-bold hover:underline">
               View All
             </Link>
           </div>
 
           <div className="divide-y divide-line/60">
-            {recentSubs.map((sub) => (
-              <div key={sub.id} className="py-2.5 flex items-center justify-between text-[12px]">
+            {recentUnlocks.length === 0 && recentSubs.length === 0 && (
+              <p className="py-6 text-xs text-muted">No payments yet.</p>
+            )}
+            {recentUnlocks.map((u) => (
+              <div key={u.id} className="py-2.5 flex items-center justify-between text-[12px]">
                 <div>
-                  <div className="font-bold text-ink">{sub.userName}</div>
+                  <div className="font-bold text-ink">{u.userName || "Listener"}</div>
                   <div className="text-[11px] text-muted">
-                    {sub.planNameSw} · {sub.paymentMethod} ({sub.referenceCode})
+                    {u.seriesTitleSw || "Series"} · {u.paymentMethod} ({u.referenceCode})
                   </div>
                 </div>
                 <div className="text-right">
                   <div className="font-bold text-deep-green">
-                    {sub.amountTzs.toLocaleString()} TZS
+                    {u.amountTzs.toLocaleString()} TZS
                   </div>
-                  <span
-                    className={`inline-block text-[10px] font-bold px-1.5 py-0.2 rounded ${
-                      sub.status === "ACTIVE"
-                        ? "bg-emerald-100 text-emerald-800"
-                        : "bg-sand text-muted"
-                    }`}
-                  >
-                    {sub.status}
+                  <span className="inline-block text-[10px] font-bold px-1.5 rounded bg-emerald-100 text-emerald-800">
+                    {u.kind}
                   </span>
                 </div>
               </div>

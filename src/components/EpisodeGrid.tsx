@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useLang, pick } from "../context/LanguageContext";
 import { fmtDuration } from "../lib/content-rules";
+import { db } from "../lib/mock/db";
 
 const PAGE_SIZE = 18;
 
@@ -42,7 +43,13 @@ export default function EpisodeGrid({ episodes }: { episodes: GridEpisode[] }) {
 
   function open(e: GridEpisode) {
     if (!e.published) return;
-    navigate(`/player/${e.id}`);
+    const episode = db.episodes.findById(e.id);
+    const series = episode ? db.series.findById(episode.seriesId) : null;
+    if (series) {
+      navigate(`/series/${series.slug}`, { state: { playEpisodeId: e.id } });
+      return;
+    }
+    navigate("/home");
   }
 
   return (

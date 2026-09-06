@@ -19,7 +19,7 @@ import KhatamStar from "./KhatamStar";
 import TermsModal from "./TermsModal";
 import { normalizePhone } from "../lib/mock/db";
 
-type AuthStep = "IDENTIFIER_CHECK" | "PASSWORD_LOGIN" | "CREATE_ACCOUNT";
+type AuthStep = "IDENTIFIER_CHECK" | "OTP_VERIFY" | "PASSWORD_LOGIN" | "CREATE_ACCOUNT";
 
 type AuthFlowProps = {
   initialStep?: AuthStep;
@@ -28,7 +28,7 @@ type AuthFlowProps = {
 
 export default function AuthFlow({ initialStep = "IDENTIFIER_CHECK", defaultPhone = "" }: AuthFlowProps) {
   const { lang, toggle } = useLang();
-  const { checkPhoneExists, loginWithPhone, registerWithPhone } = useAuth();
+  const { checkPhoneExists, loginWithPhone, registerWithPhone, sendOtp, verifyOtp } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl") || "/home";
@@ -51,14 +51,24 @@ export default function AuthFlow({ initialStep = "IDENTIFIER_CHECK", defaultPhon
   const [termsModalOpen, setTermsModalOpen] = useState(false);
   const [matchedUser, setMatchedUser] = useState<{ name: string; phone: string } | null>(null);
   const [successToast, setSuccessToast] = useState<string | null>(null);
+  const [otpCode, setOtpCode] = useState("");
+  const [otpTicket, setOtpTicket] = useState("");
+  const [otpChallengeId, setOtpChallengeId] = useState("");
+  const [otpDevAny, setOtpDevAny] = useState(true);
+  const [resendIn, setResendIn] = useState(0);
 
-  // Sync if defaultPhone changes
   useEffect(() => {
     if (defaultPhone) setPhone(defaultPhone);
   }, [defaultPhone]);
 
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const t = window.setTimeout(() => setResendIn((n) => n - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendIn]);
+
   // Handle Step 1: Identifier Check
-  function handleIdentifierSubmit(e: React.FormEvent) {
+  async function handleIdentifierSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     const clean = phone.trim();
@@ -66,29 +76,75 @@ export default function AuthFlow({ initialStep = "IDENTIFIER_CHECK", defaultPhon
     if (!clean || clean.length < 8) {
       setError(
         lang === "sw"
-          ? "Tafadhali weka nambari sahihi ya simu (mfano: 0712345678)."
-          : "Please enter a valid phone number (e.g. 0712345678)."
+          ? "Tafadhali weka nambari sahihi ya simu (mfano: 07XXXXXXXX)."
+          : "Please enter a valid phone number (e.g. 07XXXXXXXX)."
       );
       return;
     }
 
     setBusy(true);
-    // Check if phone exists in our user catalog
-    const check = checkPhoneExists(clean);
+    const sent = await sendOtp(clean);
+    setBusy(false);
+
+    if (!sent.ok) {
+      setError(sent.error || (lang === "sw" ? "Imeshindikana kutuma nambari." : "Could not send the code."));
+      return;
+    }
+
+    setOtpChallengeId(sent.challengeId || "");
+    setOtpDevAny(Boolean(sent.devAcceptAny));
+    setResendIn(sent.resendIn || 45);
+    setOtpCode("");
+    setOtpTicket("");
+    setStep("OTP_VERIFY");
+  }
+
+  async function handleOtpSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (!otpCode.trim()) {
+      setError(lang === "sw" ? "Weka nambari uliyopokea." : "Enter the code sent to your phone.");
+      return;
+    }
+
+    setBusy(true);
+    const verified = await verifyOtp(phone, otpCode.trim(), otpChallengeId || undefined);
+    if (!verified.ok || !verified.otpTicket) {
+      setBusy(false);
+      setError(verified.error || (lang === "sw" ? "Nambari si sahihi." : "That code is not valid."));
+      return;
+    }
+    setOtpTicket(verified.otpTicket);
+
+    const check = await checkPhoneExists(phone);
     setBusy(false);
 
     if (check.exists && check.user) {
-      // Existing user -> Transition to Password Login
       setMatchedUser({ name: check.user.name, phone: check.user.phone });
       setStep("PASSWORD_LOGIN");
       setPassword("");
     } else {
-      // New user -> Transition to Step 2: Create Account
       setMatchedUser(null);
       setStep("CREATE_ACCOUNT");
       setPassword("");
       setConfirmPassword("");
     }
+  }
+
+  async function handleResendOtp() {
+    if (resendIn > 0) return;
+    setError(null);
+    setBusy(true);
+    const sent = await sendOtp(phone);
+    setBusy(false);
+    if (!sent.ok) {
+      setError(sent.error || (lang === "sw" ? "Imeshindikana kutuma tena." : "Could not resend."));
+      return;
+    }
+    setOtpChallengeId(sent.challengeId || "");
+    setOtpDevAny(Boolean(sent.devAcceptAny));
+    setResendIn(sent.resendIn || 45);
+    setOtpCode("");
   }
 
   // Handle Step 2: Login with Password
@@ -102,7 +158,7 @@ export default function AuthFlow({ initialStep = "IDENTIFIER_CHECK", defaultPhon
     }
 
     setBusy(true);
-    const res = await loginWithPhone(phone, password);
+    const res = await loginWithPhone(phone, password, otpTicket);
     setBusy(false);
 
     if (!res.ok) {
@@ -156,7 +212,7 @@ export default function AuthFlow({ initialStep = "IDENTIFIER_CHECK", defaultPhon
     }
 
     setBusy(true);
-    const res = await registerWithPhone(fullName, phone, password, lang);
+    const res = await registerWithPhone(fullName, phone, password, lang, otpTicket);
     setBusy(false);
 
     if (!res.ok) {
@@ -173,22 +229,6 @@ export default function AuthFlow({ initialStep = "IDENTIFIER_CHECK", defaultPhon
     setTimeout(() => {
       navigate(callbackUrl, { replace: true });
     }, 700);
-  }
-
-  // Quick fill helper for testing
-  function quickFillPhone(num: string, autoAdvance = false) {
-    setPhone(num);
-    setError(null);
-    if (autoAdvance) {
-      const check = checkPhoneExists(num);
-      if (check.exists && check.user) {
-        setMatchedUser({ name: check.user.name, phone: check.user.phone });
-        setStep("PASSWORD_LOGIN");
-      } else {
-        setMatchedUser(null);
-        setStep("CREATE_ACCOUNT");
-      }
-    }
   }
 
   return (
@@ -229,7 +269,7 @@ export default function AuthFlow({ initialStep = "IDENTIFIER_CHECK", defaultPhon
           </button>
         ) : (
           <Link
-            to="/onboarding"
+            to="/home"
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-semibold text-[#cfc9ae] hover:text-white transition"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -303,8 +343,8 @@ export default function AuthFlow({ initialStep = "IDENTIFIER_CHECK", defaultPhon
                     }}
                     placeholder={
                       lang === "sw"
-                        ? "Nambari ya Simu (mfano: 0712345678)"
-                        : "Phone number (e.g. 0712345678)"
+                        ? "Nambari ya Simu (mfano: 07XXXXXXXX)"
+                        : "Phone number (e.g. 07XXXXXXXX)"
                     }
                     className="w-full bg-transparent text-white placeholder:text-white/40 text-sm sm:text-base font-medium focus:outline-none"
                     autoFocus
@@ -332,40 +372,87 @@ export default function AuthFlow({ initialStep = "IDENTIFIER_CHECK", defaultPhon
               {/* Bottom guidance text matching screenshot */}
               <p className="text-center text-xs text-[#a59d81] leading-relaxed pt-1">
                 {lang === "sw"
-                  ? "Tutaangalia kama una akaunti na kukuongoza ipasavyo"
-                  : "We'll check if you have an account and guide you accordingly"}
+                  ? "Tutakutumia nambari fupi ya uthibitisho kwenye simu hii"
+                  : "We'll send a short verification code to this number"}
               </p>
             </form>
 
-            {/* Quick Demo Test Buttons */}
-            <div className="pt-4 border-t border-emerald-800/30 text-center space-y-2">
-              <span className="text-[10.5px] font-bold tracking-wider uppercase text-gold-light/80 block">
-                {lang === "sw" ? "Majaribio ya Haraka (Click to test):" : "Quick Test Accounts:"}
-              </span>
-              <div className="flex flex-wrap justify-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => quickFillPhone("0754987654", true)}
-                  className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 border border-white/10 text-[11px] text-[#cfc9ae] font-medium transition cursor-pointer"
-                >
-                  👤 User: 0754987654
-                </button>
-                <button
-                  type="button"
-                  onClick={() => quickFillPhone("0712345678", true)}
-                  className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 border border-white/10 text-[11px] text-[#cfc9ae] font-medium transition cursor-pointer"
-                >
-                  ⭐ Admin: 0712345678
-                </button>
-                <button
-                  type="button"
-                  onClick={() => quickFillPhone("0626504656", true)}
-                  className="px-2.5 py-1 rounded-lg bg-gold/15 hover:bg-gold/25 border border-gold/30 text-[11px] text-gold-light font-medium transition cursor-pointer"
-                >
-                  ✨ New (Screenshot): 0626504656
-                </button>
-              </div>
+          </div>
+        )}
+
+        {step === "OTP_VERIFY" && (
+          <div className="w-full space-y-6 animate-fade-in">
+            <div className="text-center space-y-1.5">
+              <h1 className="font-display text-2xl sm:text-[28px] font-bold text-white tracking-tight">
+                {lang === "sw" ? "Thibitisha nambari" : "Verify your phone"}
+              </h1>
+              <p className="text-xs sm:text-[13px] text-[#cfc9ae]">
+                {lang === "sw"
+                  ? `Tumekutumia nambari ya uthibitisho kwa ${phone}`
+                  : `We sent a verification code to ${phone}`}
+              </p>
             </div>
+
+            <form onSubmit={handleOtpSubmit} className="space-y-4">
+              <div className="relative rounded-2xl bg-[#0c2a21]/90 border border-emerald-500/30 focus-within:border-gold focus-within:ring-2 focus-within:ring-gold/30 transition shadow-inner">
+                <div className="flex items-center px-4 py-3.5 gap-3">
+                  <ShieldCheck className="h-5 w-5 text-gold-light shrink-0 opacity-80" />
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    required
+                    value={otpCode}
+                    onChange={(e) => {
+                      setOtpCode(e.target.value);
+                      if (error) setError(null);
+                    }}
+                    placeholder={lang === "sw" ? "Weka nambari ya uthibitisho" : "Enter verification code"}
+                    className="w-full bg-transparent text-white placeholder:text-white/40 text-sm sm:text-base font-medium tracking-widest focus:outline-none"
+                    autoFocus
+                  />
+                </div>
+              </div>
+
+              {otpDevAny && (
+                <p className="text-center text-[11px] text-[#a59d81]">
+                  {lang === "sw"
+                    ? "Kwa sasa weka nambari yoyote — SMS halisi itaunganishwa baadaye."
+                    : "For now enter any code — real SMS will be connected later."}
+                </p>
+              )}
+
+              {error && (
+                <div className="p-3 rounded-xl bg-rose-950/80 border border-rose-500/40 text-rose-200 text-xs flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={busy}
+                className="w-full cursor-pointer py-3.5 px-6 rounded-xl bg-[#F3B728] hover:bg-[#ffc636] active:bg-[#e0a618] text-[#0A261E] font-extrabold text-sm sm:text-base tracking-wide shadow-lg shadow-gold/20 hover:shadow-gold/30 transition duration-200 flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                <span>{busy ? "..." : lang === "sw" ? "Thibitisha" : "Verify"}</span>
+                <ArrowRight className="h-4 w-4" />
+              </button>
+
+              <button
+                type="button"
+                disabled={busy || resendIn > 0}
+                onClick={() => void handleResendOtp()}
+                className="w-full text-center text-xs font-bold text-gold-light disabled:text-[#a59d81] disabled:no-underline hover:underline cursor-pointer disabled:cursor-default"
+              >
+                {resendIn > 0
+                  ? lang === "sw"
+                    ? `Tuma tena baada ya ${resendIn}s`
+                    : `Resend in ${resendIn}s`
+                  : lang === "sw"
+                    ? "Tuma nambari tena"
+                    : "Resend code"}
+              </button>
+            </form>
           </div>
         )}
 
@@ -445,18 +532,6 @@ export default function AuthFlow({ initialStep = "IDENTIFIER_CHECK", defaultPhon
                 <ArrowRight className="h-4 w-4" />
               </button>
 
-              {/* Demo Password quick autofill */}
-              <div className="flex justify-center gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setPassword(phone.includes("71234") ? "admin1234" : "demo1234")}
-                  className="text-[11px] text-gold-light/80 hover:text-gold underline cursor-pointer"
-                >
-                  {lang === "sw"
-                    ? `Weka nywila ya majaribio (${phone.includes("71234") ? "admin1234" : "demo1234"})`
-                    : `Autofill test password (${phone.includes("71234") ? "admin1234" : "demo1234"})`}
-                </button>
-              </div>
             </form>
 
             <div className="text-center pt-2">
@@ -522,11 +597,8 @@ export default function AuthFlow({ initialStep = "IDENTIFIER_CHECK", defaultPhon
                     <input
                       type="tel"
                       required
+                      readOnly
                       value={phone}
-                      onChange={(e) => {
-                        setPhone(e.target.value);
-                        if (error) setError(null);
-                      }}
                       className="w-full bg-transparent text-white font-mono text-sm sm:text-base font-bold focus:outline-none"
                     />
                     <button
@@ -702,13 +774,14 @@ export default function AuthFlow({ initialStep = "IDENTIFIER_CHECK", defaultPhon
                 <button
                   type="button"
                   onClick={() => {
-                    const check = checkPhoneExists(phone);
-                    if (check.exists && check.user) {
-                      setMatchedUser({ name: check.user.name, phone: check.user.phone });
-                      setStep("PASSWORD_LOGIN");
-                    } else {
-                      setStep("IDENTIFIER_CHECK");
-                    }
+                    void checkPhoneExists(phone).then((check) => {
+                      if (check.exists && check.user) {
+                        setMatchedUser({ name: check.user.name, phone: check.user.phone });
+                        setStep("PASSWORD_LOGIN");
+                      } else {
+                        setStep("IDENTIFIER_CHECK");
+                      }
+                    });
                     setError(null);
                   }}
                   className="font-bold text-emerald-300 hover:text-emerald-200 underline cursor-pointer"

@@ -71,7 +71,44 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      <div className="flex flex-col gap-2.5 max-w-xl md:max-w-2xl mx-auto w-full px-4 sm:px-5 py-6 pb-28 md:pb-10">
+        <div className="flex flex-col gap-2.5 max-w-xl md:max-w-2xl mx-auto w-full px-4 sm:px-5 py-6 pb-28 md:pb-10">
+        <Link to="/subscribe" className="flex items-center gap-3 rounded-2xl bg-white p-3.5 card-shadow transition hover:bg-warm-white">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gold text-deep-green font-black text-xs">
+            {db.unlocks.mine().length || "1"}
+          </span>
+          <div className="min-w-0">
+            <div className="text-[12px] font-bold text-deep-green">
+              {lang === "sw"
+                ? `Hadithi ${db.unlocks.mine().length} umilikiwa milele`
+                : `${db.unlocks.mine().length} stories owned forever`}
+            </div>
+            <div className="text-[10px] text-muted truncate">
+              {lang === "sw"
+                ? "Vipindi 3 vya kwanza ni bure. Fungua yaliyobaki mara moja — bila kuisha."
+                : "The first 3 episodes are free. Unlock the rest once — they never expire."}
+            </div>
+          </div>
+          <span className="ml-auto text-[12px] text-muted">→</span>
+        </Link>
+        {(user?.streakDays || 0) > 0 && (
+          <div className="flex items-center gap-3 rounded-2xl bg-white p-3.5 card-shadow">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-sand text-gold-dark font-black text-xs">
+              {user?.streakDays}
+            </span>
+            <div>
+              <div className="text-[12px] font-bold text-deep-green">
+                {lang === "sw" ? "Mfululizo wa watoto (bure)" : "Kids streak (always free)"}
+              </div>
+              <div className="text-[10px] text-muted">
+                {(user?.badges || []).length
+                  ? user!.badges!.join(" · ")
+                  : lang === "sw"
+                  ? "Beji zinakuja unaporudi kila siku"
+                  : "Badges arrive as you come back daily"}
+              </div>
+            </div>
+          </div>
+        )}
         <Link to="/saved" className="flex items-center gap-3 rounded-2xl bg-white p-3.5 card-shadow transition hover:bg-warm-white">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-sand text-gold-dark">★</span>
           <span className="text-[12px] font-bold text-deep-green">{t("saved")}</span>

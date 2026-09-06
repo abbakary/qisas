@@ -1,11 +1,15 @@
 ﻿import React, { useState, useEffect, useMemo } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useLang, pick } from "../context/LanguageContext";
 import { useAuth } from "../context/AuthContext";
 import { gradientFor } from "../lib/gradients";
 import { avgDuration, fmtDuration } from "../lib/content-rules";
 import { db, subscribeDb, type Episode, type Comment } from "../lib/mock/db";
+import { canPlayEpisode, formatTzs, isFreeEpisode, ownsSeries, seriesUnlockPrice } from "../lib/entitlements";
+import UnlockCheckoutModal, { type CheckoutMode } from "../components/UnlockCheckoutModal";
 import ShareModal from "../components/ShareModal";
+import MediaPlayer from "../components/MediaPlayer";
+import EpisodeCover from "../components/EpisodeCover";
 import {
   Play,
   Share2,
@@ -21,6 +25,7 @@ import {
   Clock,
   Sparkles,
   Check,
+  Lock,
 } from "lucide-react";
 
 export default function SeriesDetailPage() {
@@ -28,6 +33,7 @@ export default function SeriesDetailPage() {
   const { lang, t } = useLang();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [dbVersion, setDbVersion] = useState(0);
 
   // User interactions state
@@ -35,6 +41,7 @@ export default function SeriesDetailPage() {
   const [hasLiked, setHasLiked] = useState(false);
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [shareData, setShareData] = useState<{ title: string; url: string }>({ title: "", url: "" });
+  const [shareTarget, setShareTarget] = useState<{ seriesId?: string; episodeId?: string }>({});
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Comment input state
@@ -45,19 +52,35 @@ export default function SeriesDetailPage() {
 
   // Mobile active tab: 'episodes' | 'comments'
   const [mobileTab, setMobileTab] = useState<"episodes" | "comments">("episodes");
+  const [activeEpisodeId, setActiveEpisodeId] = useState<string | null>(null);
+  const [checkout, setCheckout] = useState<{ mode: CheckoutMode; amountTzs: number } | null>(null);
+  const [sponsorPrompt, setSponsorPrompt] = useState(false);
 
   useEffect(() => {
     return subscribeDb(() => setDbVersion((v) => v + 1));
   }, []);
+
+  useEffect(() => {
+    if (slug) {
+      const row = db.series.findBySlug(slug);
+      if (row?.id) void db.comments.loadForSeries(row.id).catch(() => undefined);
+    }
+  }, [slug]);
+
+  useEffect(() => {
+    const playId = (location.state as { playEpisodeId?: string } | null)?.playEpisodeId;
+    setActiveEpisodeId(playId || null);
+  }, [slug, location.state]);
 
   const series = slug ? db.series.findBySlug(slug) : null;
   const category = series ? db.categories.findById(series.categoryId) : null;
 
   useEffect(() => {
     if (series) {
-      setLikesCount(series.likes || 215);
+      setLikesCount(series.likes || 0);
+      setHasLiked(!!series.likedByMe);
     }
-  }, [series?.id]);
+  }, [series?.id, series?.likes, series?.likedByMe]);
 
   const isFavorited = useMemo(() => {
     if (!user?.id || !series?.id) return false;
@@ -86,17 +109,48 @@ export default function SeriesDetailPage() {
     return db.comments.findMany({ seriesId: series.id, parentId: commentId });
   }
 
+  /** Phone only for unlock, save, or posting — never for browse / play / read / like. */
+  function needPhone() {
+    navigate(`/login?callbackUrl=${encodeURIComponent(location.pathname)}`);
+  }
+
+  const unlocks = db.unlocks.mine();
+  const storyOfWeekId = db.monetize.storyOfWeekId();
+  const owned = ownsSeries(series?.id, user, unlocks);
+  const sow = Boolean(series && (series.isStoryOfWeek || storyOfWeekId === series.id));
+  const episodeCount = rawEpisodes.length;
+  const unlockPrice = seriesUnlockPrice(series, episodeCount);
+  const playOpts = { series, unlocks, storyOfWeekId };
+
+  function openPay(mode: CheckoutMode) {
+    if (!user) {
+      needPhone();
+      return;
+    }
+    setCheckout({ mode, amountTzs: unlockPrice });
+  }
+
   function toggleFav() {
-    if (!user?.id || !series?.id) return;
+    if (!user?.id || !series?.id) {
+      needPhone();
+      return;
+    }
     db.favorites.toggle(user.id, series.id);
   }
 
-  function handleLikeSeries() {
+  function failAction() {
+    showToast(lang === "sw" ? "Imeshindikana. Jaribu tena." : "That didn't save. Try again.");
+  }
+
+  async function handleLikeSeries() {
     if (!series?.id) return;
-    const newLikes = db.series.toggleLike(series.id);
-    setLikesCount(newLikes || likesCount + 1);
-    setHasLiked(true);
-    showToast(lang === "sw" ? "Umeipenda hadithi hii! ♥" : "Liked! ♥");
+    try {
+      const result = await db.series.toggleLike(series.id);
+      setLikesCount(result.likes);
+      setHasLiked(result.liked);
+    } catch {
+      failAction();
+    }
   }
 
   function showToast(msg: string) {
@@ -109,61 +163,108 @@ export default function SeriesDetailPage() {
     const url = window.location.href;
     const title = pick(lang, series.titleSw, series.title);
     setShareData({ title, url });
+    setShareTarget({ seriesId: series.id });
     setShareModalOpen(true);
   }
 
   function handleShareEpisode(ep: Episode, e: React.MouseEvent) {
     e.stopPropagation();
     if (!series) return;
-    const url = `${window.location.origin}/player/${ep.id}`;
+    const url = `${window.location.origin}/series/${series.slug}`;
     const title = `${pick(lang, series.titleSw, series.title)} - ${pick(lang, ep.titleSw, ep.title)}`;
     setShareData({ title, url });
+    setShareTarget({ seriesId: series.id, episodeId: ep.id });
     setShareModalOpen(true);
   }
 
-  function handleAddComment(e: React.FormEvent) {
+  async function handleAddComment(e: React.FormEvent) {
     e.preventDefault();
+    if (!user) {
+      needPhone();
+      return;
+    }
     if (!commentText.trim() || !series?.id) return;
-
-    db.comments.create({
-      seriesId: series.id,
-      userId: user?.id || "guest",
-      userName: user?.name || (lang === "sw" ? "Mgeni Rasmi" : "Guest Viewer"),
-      userPhone: user?.phone || "+255700000000",
-      text: commentText.trim(),
-      likes: 0,
-    });
-
+    const text = commentText.trim();
     setCommentText("");
-    showToast(lang === "sw" ? "Maoni yametumwa!" : "Comment posted!");
+    try {
+      await db.comments.create({
+        seriesId: series.id,
+        userId: user.id,
+        userName: user.name,
+        userPhone: user.phone,
+        text,
+        likes: 0,
+      });
+      showToast(lang === "sw" ? "Maoni yametumwa!" : "Comment posted!");
+    } catch {
+      setCommentText(text);
+      failAction();
+    }
   }
 
-  function handleAddReply(parentId: string) {
+  async function handleAddReply(parentId: string) {
+    if (!user) {
+      needPhone();
+      return;
+    }
     if (!replyText.trim() || !series?.id) return;
-
-    db.comments.create({
-      seriesId: series.id,
-      parentId,
-      userId: user?.id || "guest",
-      userName: user?.name || (lang === "sw" ? "Mgeni Rasmi" : "Guest Viewer"),
-      userPhone: user?.phone || "+255700000000",
-      text: replyText.trim(),
-      likes: 0,
-    });
-
+    const text = replyText.trim();
     setReplyText("");
     setReplyingToId(null);
     setExpandedReplies((prev) => ({ ...prev, [parentId]: true }));
-    showToast(lang === "sw" ? "Jibu limetumwa!" : "Reply posted!");
+    try {
+      await db.comments.create({
+        seriesId: series.id,
+        parentId,
+        userId: user.id,
+        userName: user.name,
+        userPhone: user.phone,
+        text,
+        likes: 0,
+      });
+      showToast(lang === "sw" ? "Jibu limetumwa!" : "Reply posted!");
+    } catch {
+      setReplyText(text);
+      setReplyingToId(parentId);
+      failAction();
+    }
   }
 
-  function handleLikeComment(commentId: string) {
-    db.comments.toggleLike(commentId);
+  async function handleLikeComment(commentId: string) {
+    try {
+      await db.comments.toggleLike(commentId);
+    } catch {
+      failAction();
+    }
   }
 
   function toggleExpandReplies(commentId: string) {
     setExpandedReplies((prev) => ({ ...prev, [commentId]: !prev[commentId] }));
   }
+
+  function startPlayback(ep: Episode) {
+    if (!series) return;
+    if (!canPlayEpisode(ep, user, playOpts)) {
+      openPay("unlock");
+      return;
+    }
+    setActiveEpisodeId(ep.id);
+    setMobileTab("episodes");
+    db.series.incrementViews(series.id);
+    db.episodes.incrementViews(ep.id);
+    window.requestAnimationFrame(() => {
+      document.getElementById("series-player")?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    });
+  }
+
+  const publishedEps = rawEpisodes.filter((e) => e.published);
+  const resumeTarget = useMemo(() => {
+    if (!user?.id || !series?.id) return null;
+    return db.progress.resumeTarget(user.id, series.id);
+  }, [user?.id, series?.id, dbVersion]);
 
   if (!series) {
     return (
@@ -179,8 +280,8 @@ export default function SeriesDetailPage() {
     );
   }
 
-  const publishedEps = rawEpisodes.filter((e) => e.published);
-  const firstPlayable = publishedEps[0];
+  const playTarget =
+    (resumeTarget && publishedEps.find((e) => e.id === resumeTarget.episodeId)) || publishedEps[0];
   const viewsDisplay = series.views ? `${(series.views / 1000).toFixed(1)}K` : "2.1K";
 
   return (
@@ -199,6 +300,7 @@ export default function SeriesDetailPage() {
         onClose={() => setShareModalOpen(false)}
         title={shareData.title}
         url={shareData.url}
+        onShare={(channel) => db.shares.track({ ...shareTarget, channel })}
         onCopySuccess={() => showToast(lang === "sw" ? "Kiungo kimenakiliwa!" : "Link copied!")}
       />
 
@@ -277,17 +379,37 @@ export default function SeriesDetailPage() {
             <p className="text-xs text-[#cfc9ae] leading-relaxed max-w-2xl pt-0.5">
               {pick(lang, series.descriptionSw, series.description)}
             </p>
+            <p className="text-[11px] text-gold-light/85">
+              {lang === "sw"
+                ? "Vipindi 3 vya kwanza ni bure daima. Maoni yanasomwa na kila mtu."
+                : "The first 3 episodes are free forever. Comments are open to read."}
+              {(series.sponsoredPlays || 0) > 0
+                ? ` · ${series.sponsoredPlays} ${
+                    lang === "sw"
+                      ? "watoto/wasikilizaji walifika kwa sababu ya wadhamini"
+                      : "listeners reached because of sponsors"
+                  }`
+                : ""}
+            </p>
 
             {/* User Interaction Action Buttons */}
             <div className="flex flex-wrap items-center gap-2.5 pt-2">
               {/* Play Button */}
-              {firstPlayable && (
+              {playTarget && (
                 <button
-                  onClick={() => navigate(`/player/${firstPlayable.id}`)}
+                  onClick={() => startPlayback(playTarget)}
                   className="flex items-center gap-1.5 rounded-full bg-gold hover:bg-gold-light text-deep-green px-5 py-2 text-xs font-black shadow-md hover:scale-105 active:scale-95 transition cursor-pointer"
                 >
                   <Play size={14} fill="currentColor" />
-                  <span>{lang === "sw" ? "Tazama Sasa" : "Play"}</span>
+                  <span>
+                    {resumeTarget && resumeTarget.positionSec >= 5
+                      ? lang === "sw"
+                        ? "Endelea"
+                        : "Resume"
+                      : lang === "sw"
+                      ? "Tazama Sasa"
+                      : "Play"}
+                  </span>
                 </button>
               )}
 
@@ -315,6 +437,27 @@ export default function SeriesDetailPage() {
                 </span>
               </button>
 
+              {!owned && !sow && (
+                <button
+                  onClick={() => openPay("unlock")}
+                  className="flex items-center gap-1.5 rounded-full bg-gold text-deep-green px-4 py-2 text-xs font-black shadow-md hover:scale-105 transition"
+                >
+                  <Lock size={13} />
+                  {formatTzs(unlockPrice)} · {lang === "sw" ? "milele" : "forever"}
+                </button>
+              )}
+              {(owned || sow) && (
+                <span className="rounded-full bg-emerald-500/20 border border-emerald-300/30 text-emerald-100 px-3 py-2 text-[10px] font-extrabold uppercase">
+                  {owned
+                    ? lang === "sw"
+                      ? "Yako milele"
+                      : "Yours forever"
+                    : lang === "sw"
+                    ? "Hadithi ya wiki"
+                    : "Story of the week"}
+                </span>
+              )}
+
               {/* Like Button */}
               <button
                 onClick={handleLikeSeries}
@@ -331,6 +474,63 @@ export default function SeriesDetailPage() {
           </div>
         </div>
       </div>
+
+      {activeEpisodeId && (() => {
+        const activeEp = publishedEps.find((e) => e.id === activeEpisodeId);
+        if (!activeEp) return null;
+        const allowed = canPlayEpisode(activeEp, user, playOpts);
+        const resumePos = user?.id ? db.progress.find(user.id, activeEp.id)?.positionSec ?? 0 : 0;
+        const nextEp = publishedEps.find((e) => e.order > activeEp.order);
+
+        return (
+          <div
+            id="series-player"
+            className="max-w-7xl mx-auto w-full px-5 md:px-10 lg:px-16 pt-5"
+          >
+            {allowed ? (
+              <>
+                <div className="overflow-hidden rounded-2xl bg-black border border-line shadow-md">
+                  <MediaPlayer
+                    key={activeEp.id}
+                    episodeId={activeEp.id}
+                    mediaUrl={activeEp.mediaUrl}
+                    mediaType={activeEp.mediaType}
+                    poster={activeEp.posterUrl || undefined}
+                    initialPosition={resumePos}
+                    autoPlay
+                    onCompleted={() => {
+                      if (nextEp) startPlayback(nextEp);
+                    }}
+                  />
+                </div>
+                <p className="mt-2 text-xs font-bold text-ink">
+                  {lang === "sw" ? "KIPINDI" : "EPISODE"}{" "}
+                  {String(activeEp.order).padStart(2, "0")} ·{" "}
+                  {pick(lang, activeEp.titleSw, activeEp.title)}
+                </p>
+              </>
+            ) : (
+              <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-line bg-[#07130E] px-6 py-12 text-center">
+                <Lock className="text-gold" size={28} />
+                <p className="font-display text-base text-warm-white">
+                  {lang === "sw" ? "Karibu kuendelea na hadithi" : "You are welcome to continue"}
+                </p>
+                <p className="text-[11px] text-gold-light/80">
+                  {lang === "sw"
+                    ? "Vipindi 3 vya kwanza ni bure. Malipo ni mara moja — hadithi inabaki kwako."
+                    : "The first 3 episodes are a gift. One payment keeps the rest with you."}
+                </p>
+                <button
+                  onClick={() => openPay("unlock")}
+                  className="rounded-full bg-gold px-5 py-2 text-xs font-black text-deep-green"
+                >
+                  {formatTzs(unlockPrice)} · {lang === "sw" ? "Fungua" : "Unlock"}
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Mobile Tab Switcher (hidden on desktop) */}
       <div className="lg:hidden flex border-b border-line px-5 bg-white sticky top-0 z-30 shadow-xs">
@@ -394,21 +594,35 @@ export default function SeriesDetailPage() {
                     ep.descriptionSw || series.descriptionSw,
                     ep.description || series.description
                   );
+                  const epProgress = user?.id ? db.progress.find(user.id, ep.id) : null;
+                  const isResumeEp = resumeTarget?.episodeId === ep.id;
+                  const isPlaying = activeEpisodeId === ep.id;
+                  const watchedPct =
+                    epProgress && ep.durationSec
+                      ? Math.min(100, Math.max(0, (epProgress.positionSec / ep.durationSec) * 100))
+                      : 0;
 
                   return (
                     <div
                       key={ep.id}
-                      onClick={() => navigate(`/player/${ep.id}`)}
-                      className="group relative flex flex-col sm:flex-row items-start sm:items-center gap-3 p-3 rounded-2xl bg-white hover:bg-sand/30 border border-line hover:border-gold/60 transition duration-200 cursor-pointer shadow-sm hover:shadow"
+                      onClick={() => startPlayback(ep)}
+                      className={`group relative flex flex-col sm:flex-row items-start sm:items-center gap-3 p-3 rounded-2xl bg-white hover:bg-sand/30 border transition duration-200 cursor-pointer shadow-sm hover:shadow ${
+                        isPlaying || isResumeEp ? "border-gold bg-gold/5" : "border-line hover:border-gold/60"
+                      }`}
                     >
                       {/* Left: Thumbnail */}
                       <div className="relative w-full sm:w-36 aspect-video flex-shrink-0 rounded-xl overflow-hidden bg-[#0F3D2E]">
-                        <img
-                          src={ep.posterUrl || series.image || "/media/series/musa-as.jpg"}
+                        <EpisodeCover
+                          src={ep.posterUrl}
+                          mediaUrl={ep.mediaUrl}
+                          mediaType={ep.mediaType}
+                          order={ep.order}
+                          title={epTitle}
+                          seriesTitle={pick(lang, series.titleSw, series.title)}
                           alt={epTitle}
                           className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
                         />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent" />
 
                         {/* Duration Pill at bottom right */}
                         <span className="absolute bottom-1 right-1 rounded bg-black/75 px-1.5 py-0.5 text-[9px] font-bold text-white">
@@ -430,14 +644,36 @@ export default function SeriesDetailPage() {
                             <span className="rounded bg-sand px-2 py-0.5 text-[9px] font-bold text-deep-green uppercase">
                               EP {ep.order}
                             </span>
+                            {isPlaying && (
+                              <span className="rounded bg-deep-green px-1.5 py-0.5 text-[8.5px] font-bold uppercase text-warm-white">
+                                {lang === "sw" ? "Inacheza" : "Playing"}
+                              </span>
+                            )}
+                            {isResumeEp && !isPlaying && (
+                              <span className="rounded bg-gold px-1.5 py-0.5 text-[8.5px] font-bold uppercase text-deep-green">
+                                {lang === "sw" ? "Endelea" : "Resume"}
+                              </span>
+                            )}
                             <span
                               className={`rounded px-1.5 py-0.5 text-[8.5px] font-bold uppercase ${
-                                ep.isFree
+                                canPlayEpisode(ep, user, playOpts)
                                   ? "bg-emerald-100 text-emerald-800"
                                   : "bg-amber-100 text-amber-800"
                               }`}
                             >
-                              {ep.isFree ? (lang === "sw" ? "Bure" : "Free") : "VIP"}
+                              {isFreeEpisode(ep)
+                                ? lang === "sw"
+                                  ? "Bure"
+                                  : "Free"
+                                : sow
+                                ? lang === "sw"
+                                  ? "Wiki hii"
+                                  : "This week"
+                                : owned
+                                ? lang === "sw"
+                                  ? "Yako"
+                                  : "Owned"
+                                : formatTzs(unlockPrice)}
                             </span>
                           </div>
 
@@ -465,6 +701,11 @@ export default function SeriesDetailPage() {
                             <span>{lang === "sw" ? "Shiriki" : "Share"}</span>
                           </button>
                         </div>
+                        {watchedPct > 2 && (
+                          <div className="mt-2 h-1 w-full rounded-full bg-line overflow-hidden">
+                            <div className="h-full bg-gold" style={{ width: `${watchedPct}%` }} />
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
@@ -492,7 +733,8 @@ export default function SeriesDetailPage() {
               </span>
             </div>
 
-            {/* Comment Form */}
+            {/* Comment Form — read is open; posting needs a light signup */}
+            {user ? (
             <form
               onSubmit={handleAddComment}
               className="relative flex items-center rounded-2xl bg-white border border-line p-1.5 focus-within:border-gold transition shadow-sm"
@@ -513,6 +755,17 @@ export default function SeriesDetailPage() {
                 <Send size={13} />
               </button>
             </form>
+            ) : (
+              <button
+                type="button"
+                onClick={needPhone}
+                className="w-full rounded-2xl border border-line bg-white px-4 py-3 text-xs font-bold text-deep-green text-left"
+              >
+                {lang === "sw"
+                  ? "Soma maoni hapa. Ingia kwa namba ili uandike au ujibu."
+                  : "Comments are open to read. Enter your phone to post or reply."}
+              </button>
+            )}
 
             {/* List of Comments */}
             {rootComments.length === 0 ? (
@@ -556,9 +809,11 @@ export default function SeriesDetailPage() {
 
                         <button
                           onClick={() => handleLikeComment(cmt.id)}
-                          className="flex items-center gap-1 text-[11px] text-muted hover:text-rose-600 transition cursor-pointer"
+                          className={`flex items-center gap-1 text-[11px] transition cursor-pointer ${
+                            cmt.likedByMe ? "text-rose-600" : "text-muted hover:text-rose-600"
+                          }`}
                         >
-                          <Heart size={12} />
+                          <Heart size={12} fill={cmt.likedByMe ? "currentColor" : "none"} />
                           <span>{cmt.likes || 0}</span>
                         </button>
                       </div>
@@ -643,9 +898,11 @@ export default function SeriesDetailPage() {
                                 </div>
                                 <button
                                   onClick={() => handleLikeComment(rep.id)}
-                                  className="flex items-center gap-0.5 text-[9.5px] text-muted hover:text-rose-600"
+                                  className={`flex items-center gap-0.5 text-[9.5px] ${
+                                    rep.likedByMe ? "text-rose-600" : "text-muted hover:text-rose-600"
+                                  }`}
                                 >
-                                  <Heart size={10} />
+                                  <Heart size={10} fill={rep.likedByMe ? "currentColor" : "none"} />
                                   <span>{rep.likes || 0}</span>
                                 </button>
                               </div>
@@ -664,6 +921,62 @@ export default function SeriesDetailPage() {
           </div>
         </div>
       </div>
+
+      {checkout && (
+        <UnlockCheckoutModal
+          open
+          mode={checkout.mode}
+          seriesId={series.id}
+          seriesTitle={pick(lang, series.titleSw, series.title)}
+          amountTzs={checkout.amountTzs}
+          onClose={() => setCheckout(null)}
+          onSuccess={(mode) => {
+            if (mode === "unlock") {
+              const key = `qisas.sponsorPrompt.${user?.id}.${series.id}`;
+              if (!sessionStorage.getItem(key)) {
+                sessionStorage.setItem(key, "1");
+                setCheckout(null);
+                setSponsorPrompt(true);
+              }
+            }
+          }}
+        />
+      )}
+
+      {sponsorPrompt && (
+        <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-3xl bg-white p-5 shadow-2xl">
+            <div className="text-[10px] font-semibold uppercase tracking-widest text-gold-dark">Sadaqah</div>
+            <h3 className="font-display text-xl text-deep-green mt-1">
+              {lang === "sw" ? "Wape wengine pia?" : "Share this with others?"}
+            </h3>
+            <p className="mt-2 text-xs text-muted leading-relaxed">
+              {lang === "sw"
+                ? `Ikiwa hadithi imekunufaisha, unaweza kufungua ufikiaji kwa mwingine — ${formatTzs(unlockPrice)}, bila kujitangaza.`
+                : `If this story has helped you, you may open it for someone else — ${formatTzs(unlockPrice)}, quietly.`}
+            </p>
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setSponsorPrompt(false);
+                  setCheckout({ mode: "sponsor", amountTzs: unlockPrice });
+                }}
+                className="btn-primary flex-1"
+              >
+                {lang === "sw" ? "Ndiyo, kwa utulivu" : "Yes, quietly"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setSponsorPrompt(false)}
+                className="flex-1 rounded-xl border border-line px-3 py-2 text-xs font-bold"
+              >
+                {lang === "sw" ? "Si sasa" : "Not now"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -17,6 +17,8 @@ export default function NewSeriesPage() {
     categoryId: categories[0]?.id ?? "",
     coverGradient: "teal",
     featured: false,
+    unlockPriceTzs: 1000,
+    isStoryOfWeek: false,
   });
   const [slugTouched, setSlugTouched] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
@@ -148,9 +150,22 @@ export default function NewSeriesPage() {
           )}
         </div>
 
+        <label className="block">
+          <span className="field-label">Unlock price (TZS, owned forever)</span>
+          <select className="field-box" value={f.unlockPriceTzs} onChange={(e) => set("unlockPriceTzs", Number(e.target.value))}>
+            <option value={500}>500 — short</option>
+            <option value={1000}>1,000 — standard</option>
+            <option value={1500}>1,500 — long / high production</option>
+          </select>
+        </label>
+
         <label className="flex items-center gap-2 text-[12px] font-semibold text-deep-green cursor-pointer">
           <input type="checkbox" checked={f.featured} onChange={(e) => set("featured", e.target.checked)} className="accent-gold" />
           Featured on Home
+        </label>
+        <label className="flex items-center gap-2 text-[12px] font-semibold text-deep-green cursor-pointer">
+          <input type="checkbox" checked={f.isStoryOfWeek} onChange={(e) => set("isStoryOfWeek", e.target.checked)} className="accent-gold" />
+          Story of the week (full series free this rotation)
         </label>
 
         {msg && (

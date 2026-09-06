@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Play, Info, ChevronLeft, ChevronRight, Eye, Heart } from "lucide-react";
 import { useLang, pick } from "../context/LanguageContext";
+import { useAuth } from "../context/AuthContext";
 import type { Lang } from "../lib/i18n";
 import { db, type Series } from "../lib/mock/db";
 import KhatamStar from "./KhatamStar";
@@ -23,6 +24,7 @@ const INTERVAL = 3200; // ms — always advances, regardless of hover
 
 export default function HomeHeroSlideshow({ items }: { items: SlideItem[] }) {
   const { lang } = useLang();
+  const { user } = useAuth();
   const navigate = useNavigate();
 
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -111,8 +113,11 @@ export default function HomeHeroSlideshow({ items }: { items: SlideItem[] }) {
   function handleLike(e: React.MouseEvent, seriesId: string) {
     e.preventDefault();
     e.stopPropagation();
-    db.series.toggleLike(seriesId);
-    setLikedMap((prev) => ({ ...prev, [seriesId]: !prev[seriesId] }));
+    const next = !likedMap[seriesId];
+    setLikedMap((prev) => ({ ...prev, [seriesId]: next }));
+    void db.series.toggleLike(seriesId).catch(() => {
+      setLikedMap((prev) => ({ ...prev, [seriesId]: !next }));
+    });
   }
 
   if (!items || total === 0) return null;
@@ -160,6 +165,11 @@ export default function HomeHeroSlideshow({ items }: { items: SlideItem[] }) {
             direction={direction}
             isLiked={likedMap[items[currentIndex].series.id]}
             onLike={(e) => handleLike(e, items[currentIndex].series.id)}
+            resumeEpisodeId={
+              user?.id
+                ? db.progress.resumeTarget(user.id, items[currentIndex].series.id)?.episodeId
+                : undefined
+            }
           />
         </div>
 
@@ -197,7 +207,7 @@ export default function HomeHeroSlideshow({ items }: { items: SlideItem[] }) {
 // ── SlideCard ────────────────────────────────────────────────────────────────
 
 function SlideCard({
-  item, lang, navigate, direction, isLiked, onLike,
+  item, lang, navigate, direction, isLiked, onLike, resumeEpisodeId,
 }: {
   item: SlideItem;
   lang: Lang;
@@ -205,6 +215,7 @@ function SlideCard({
   direction: "next" | "prev";
   isLiked?: boolean;
   onLike: (e: React.MouseEvent) => void;
+  resumeEpisodeId?: string;
 }) {
   const { series, firstEpisodeId, badgeLabel } = item;
   const title       = pick(lang, series.titleSw,       series.title);
@@ -212,7 +223,7 @@ function SlideCard({
 
   function handlePlay(e: React.MouseEvent) {
     e.stopPropagation();
-    navigate(firstEpisodeId ? `/player/${firstEpisodeId}` : `/series/${series.slug}`);
+    navigate(`/series/${series.slug}`);
   }
   function handleInfo(e: React.MouseEvent) {
     e.stopPropagation();

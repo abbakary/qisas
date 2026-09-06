@@ -1,25 +1,38 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
-import { db, normalizePhone } from "../lib/mock/db";
+import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
+import { AUTH_LOST_EVENT, api, getToken, setToken } from "../lib/api/client";
+import { hydrate, normalizePhone } from "../lib/mock/db";
 import type { SessionUser, Role } from "../lib/mock/types";
 
 type AuthCtx = {
   user: SessionUser | null;
   loading: boolean;
   login: (phoneOrEmail: string, password: string) => Promise<{ ok: boolean; error?: string }>;
-  loginWithPhone: (phone: string, password: string) => Promise<{ ok: boolean; error?: string }>;
+  loginWithPhone: (phone: string, password: string, otpTicket?: string) => Promise<{ ok: boolean; error?: string }>;
   register: (name: string, emailOrPhone: string, password: string, language?: string) => Promise<{ ok: boolean; error?: string }>;
-  registerWithPhone: (name: string, phone: string, password: string, language?: string) => Promise<{ ok: boolean; error?: string }>;
-  checkPhoneExists: (phone: string) => { exists: boolean; user?: { id: string; name: string; phone: string; role: Role } };
+  registerWithPhone: (name: string, phone: string, password: string, language?: string, otpTicket?: string) => Promise<{ ok: boolean; error?: string }>;
+  checkPhoneExists: (phone: string) => Promise<{ exists: boolean; user?: { id: string; name: string; phone: string; role: Role } }>;
+  sendOtp: (phone: string) => Promise<{ ok: boolean; challengeId?: string; resendIn?: number; devAcceptAny?: boolean; error?: string }>;
+  verifyOtp: (phone: string, code: string, challengeId?: string) => Promise<{ ok: boolean; otpTicket?: string; error?: string }>;
   logout: () => void;
   updateUser: (patch: Partial<SessionUser>) => void;
+  refreshMe: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthCtx | null>(null);
-
 const AUTH_STORAGE_KEY = "qisas.react.session";
+
+function persistSession(u: SessionUser | null) {
+  try {
+    if (u) localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(u));
+    else localStorage.removeItem(AUTH_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<SessionUser | null>(() => {
+    if (!getToken()) return null;
     try {
       const raw = localStorage.getItem(AUTH_STORAGE_KEY);
       if (raw) return JSON.parse(raw);
@@ -28,62 +41,85 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     return null;
   });
-
   const [loading, setLoading] = useState(false);
 
   const saveUser = useCallback((u: SessionUser | null) => {
     setUser(u);
+    persistSession(u);
+  }, []);
+
+  const refreshMe = useCallback(async () => {
+    if (!getToken()) return;
     try {
-      if (u) {
-        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(u));
-      } else {
-        localStorage.removeItem(AUTH_STORAGE_KEY);
-      }
+      const me = await api<SessionUser>("/api/auth/me");
+      saveUser(me);
+      await hydrate();
     } catch {
-      /* ignore */
+      setToken(null);
+      saveUser(null);
+    }
+  }, [saveUser]);
+
+  useEffect(() => {
+    void refreshMe();
+  }, [refreshMe]);
+
+  useEffect(() => {
+    const onLost = () => saveUser(null);
+    window.addEventListener(AUTH_LOST_EVENT, onLost);
+    return () => window.removeEventListener(AUTH_LOST_EVENT, onLost);
+  }, [saveUser]);
+
+  const checkPhoneExists = useCallback(async (phoneInput: string) => {
+    try {
+      return await api("/api/auth/check-phone", {
+        method: "POST",
+        body: JSON.stringify({ phone: phoneInput.trim() }),
+      });
+    } catch {
+      return { exists: false };
     }
   }, []);
 
-  const checkPhoneExists = useCallback((phoneInput: string) => {
-    const clean = phoneInput.trim();
-    const match = db.users.findByPhone(clean);
-    if (match) {
-      return {
-        exists: true,
-        user: {
-          id: match.id,
-          name: match.name,
-          phone: match.phone,
-          role: match.role,
-        },
-      };
+  const sendOtp = useCallback(async (phoneInput: string) => {
+    try {
+      return await api("/api/auth/otp/send", {
+        method: "POST",
+        body: JSON.stringify({ phone: phoneInput.trim() }),
+      });
+    } catch (err: any) {
+      return { ok: false, error: err?.message || "Could not send code." };
     }
-    return { exists: false };
+  }, []);
+
+  const verifyOtp = useCallback(async (phoneInput: string, code: string, challengeId?: string) => {
+    try {
+      return await api("/api/auth/otp/verify", {
+        method: "POST",
+        body: JSON.stringify({ phone: phoneInput.trim(), code, challengeId }),
+      });
+    } catch (err: any) {
+      return { ok: false, error: err?.message || "Incorrect code." };
+    }
   }, []);
 
   const loginWithPhone = useCallback(
-    async (phoneInput: string, passwordInput: string) => {
+    async (phoneInput: string, passwordInput: string, otpTicket?: string) => {
       setLoading(true);
-      const cleanPhone = phoneInput.trim();
-      const match = db.users.findByPhone(cleanPhone);
-      setLoading(false);
-      if (!match || match.password !== passwordInput) {
-        return {
-          ok: false,
-          error: "Nambari ya simu au nywila si sahihi. / Invalid phone or password.",
-        };
+      try {
+        const res = await api<{ token: string; user: SessionUser }>("/api/auth/login", {
+          method: "POST",
+          body: JSON.stringify({ phone: phoneInput.trim(), password: passwordInput, otpTicket }),
+        });
+        setToken(res.token);
+        saveUser(res.user);
+        await hydrate();
+        return { ok: true };
+      } catch (err: any) {
+        return { ok: false, error: err?.message || "Invalid phone or password." };
+      } finally {
+        setLoading(false);
       }
-      const session: SessionUser = {
-        id: match.id,
-        name: match.name,
-        email: match.email,
-        phone: match.phone,
-        role: match.role,
-        language: match.language || "sw",
-        subscriptionStatus: match.subscriptionStatus,
-      };
-      saveUser(session);
-      return { ok: true };
     },
     [saveUser]
   );
@@ -91,111 +127,64 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = useCallback(
     async (identifierInput: string, passwordInput: string) => {
       setLoading(true);
-      const clean = identifierInput.trim();
-      // Try phone lookup first, then email
-      let match = db.users.findByPhone(clean);
-      if (!match) {
-        match = db.users.findByEmail(clean);
+      try {
+        const res = await api<{ token: string; user: SessionUser }>("/api/auth/login", {
+          method: "POST",
+          body: JSON.stringify({ identifier: identifierInput.trim(), password: passwordInput }),
+        });
+        setToken(res.token);
+        saveUser(res.user);
+        await hydrate();
+        return { ok: true };
+      } catch (err: any) {
+        return { ok: false, error: err?.message || "Wrong credentials." };
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
-      if (!match || match.password !== passwordInput) {
-        return {
-          ok: false,
-          error: "Nambari ya simu/barua pepe au nywila si sahihi. / Wrong credentials.",
-        };
-      }
-      const session: SessionUser = {
-        id: match.id,
-        name: match.name,
-        email: match.email,
-        phone: match.phone,
-        role: match.role,
-        language: match.language || "sw",
-        subscriptionStatus: match.subscriptionStatus,
-      };
-      saveUser(session);
-      return { ok: true };
     },
     [saveUser]
   );
 
   const registerWithPhone = useCallback(
-    async (name: string, phoneInput: string, passwordInput: string, language = "sw") => {
+    async (name: string, phoneInput: string, passwordInput: string, language = "sw", otpTicket?: string) => {
       setLoading(true);
-      const normalized = normalizePhone(phoneInput);
-      const existing = db.users.findByPhone(normalized);
-      if (existing) {
+      try {
+        const res = await api<{ token: string; user: SessionUser }>("/api/auth/register", {
+          method: "POST",
+          body: JSON.stringify({
+            name: name.trim(),
+            phone: normalizePhone(phoneInput),
+            password: passwordInput,
+            language,
+            otpTicket,
+          }),
+        });
+        setToken(res.token);
+        saveUser(res.user);
+        await hydrate();
+        return { ok: true };
+      } catch (err: any) {
+        return { ok: false, error: err?.message || "Could not create account." };
+      } finally {
         setLoading(false);
-        return {
-          ok: false,
-          error: "Nambari hii ya simu tayari imesajiliwa. / An account with this phone already exists.",
-        };
       }
-      const cleanDigits = normalized.replace(/\D/g, "");
-      const email = `${cleanDigits || "user"}@qisas.local`;
-      const newUser = db.users.create({
-        name: name.trim(),
-        phone: normalized,
-        email,
-        password: passwordInput,
-        role: "USER",
-        language,
-        subscriptionStatus: "FREE_TIER",
-      });
-      setLoading(false);
-      const session: SessionUser = {
-        id: newUser.id,
-        name: newUser.name,
-        email: newUser.email,
-        phone: newUser.phone,
-        role: newUser.role,
-        language: newUser.language || "sw",
-        subscriptionStatus: newUser.subscriptionStatus,
-      };
-      saveUser(session);
-      return { ok: true };
     },
     [saveUser]
   );
 
   const register = useCallback(
     async (name: string, emailOrPhone: string, passwordInput: string, language = "sw") => {
-      // If it looks like a phone, use registerWithPhone
       const trimmed = emailOrPhone.trim();
       if (!trimmed.includes("@")) {
         return registerWithPhone(name, trimmed, passwordInput, language);
       }
-      setLoading(true);
-      const email = trimmed.toLowerCase();
-      const existing = db.users.findByEmail(email);
-      if (existing) {
-        setLoading(false);
-        return { ok: false, error: "An account with this email already exists." };
-      }
-      const newUser = db.users.create({
-        name,
-        email,
-        password: passwordInput,
-        role: "USER",
-        language,
-      });
-      setLoading(false);
-      const session: SessionUser = {
-        id: newUser.id,
-        name: newUser.name,
-        email: newUser.email,
-        phone: newUser.phone,
-        role: newUser.role,
-        language: newUser.language,
-        subscriptionStatus: newUser.subscriptionStatus,
-      };
-      saveUser(session);
-      return { ok: true };
+      return registerWithPhone(name, trimmed, passwordInput, language);
     },
-    [registerWithPhone, saveUser]
+    [registerWithPhone]
   );
 
   const logout = useCallback(() => {
+    setToken(null);
     saveUser(null);
   }, [saveUser]);
 
@@ -203,9 +192,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser((prev) => {
       if (!prev) return null;
       const updated = { ...prev, ...patch };
-      try {
-        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updated));
-      } catch {}
+      persistSession(updated);
       return updated;
     });
   }, []);
@@ -220,8 +207,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         register,
         registerWithPhone,
         checkPhoneExists,
+        sendOtp,
+        verifyOtp,
         logout,
         updateUser,
+        refreshMe,
       }}
     >
       {children}

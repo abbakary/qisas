@@ -46,10 +46,128 @@ export type Series = {
   published: boolean;           // viewer only sees published
   views: number;
   likes?: number;
+  likedByMe?: boolean;
+  shareCount?: number;
   seasonsCount: number;
   rating?: number;
   tags?: string[];
+  unlockPriceTzs?: number;
+  isStoryOfWeek?: boolean;
+  sponsoredPlays?: number;
+  sponsorPool?: number;
   createdAt: string;            // ISO-8601
+};
+
+export type UnlockKind = "PURCHASE" | "BUNDLE" | "SPONSORED_GRANT";
+export type MobileMoneyMethod = "M-Pesa" | "Tigo Pesa" | "Airtel Money";
+export type PaymentMethod = MobileMoneyMethod | "Card" | "Sadaqah" | "Admin Grant";
+
+export type SeriesUnlock = {
+  id: string;
+  userId: string;
+  userName?: string;
+  userPhone?: string;
+  seriesId: string;
+  seriesTitle?: string;
+  seriesTitleSw?: string;
+  kind: UnlockKind;
+  amountTzs: number;
+  paymentMethod: string;
+  referenceCode: string;
+  status: "ACTIVE" | "PENDING";
+  createdAt: string;
+};
+
+export type Sponsorship = {
+  id: string;
+  donorId?: string | null;
+  donorName?: string | null;
+  seriesId: string;
+  seriesTitleSw?: string;
+  amountTzs: number;
+  paymentMethod: string;
+  referenceCode: string;
+  anonymous: boolean;
+  targetLabel?: string | null;
+  createdAt: string;
+};
+
+export type StarterBundle = {
+  id: string;
+  seriesCount: number;
+  amountTzs: number;
+  name: string;
+  planNameSw: string;
+};
+
+export type MonetizeKpis = {
+  weeklyActiveHint: number;
+  freeUsers: number;
+  unlocks: number;
+  sponsorships: number;
+  sponsoredPlays: number;
+  sponsorPool: number;
+  freeToUnlockRate: number;
+  unlockToSponsorRate: number;
+  revenueTzs: number;
+  topConvertingSeries: [string, number][];
+};
+
+export type AnalyticsInsight = { tone: "good" | "watch" | "go"; title: string; detail: string };
+export type AnalyticsDaily = {
+  date: string;
+  label: string;
+  unlocks: number;
+  sadaqah: number;
+  revenueTzs: number;
+  completions: number;
+  newUsers: number;
+};
+export type AnalyticsSeriesRow = {
+  id: string;
+  slug: string;
+  titleSw: string;
+  title: string;
+  views: number;
+  likes: number;
+  priceTzs: number;
+  unlocks: number;
+  revenueTzs: number;
+  starters: number;
+  completers: number;
+  completionRate: number;
+  convertHint: number;
+  sponsoredPlays: number;
+};
+export type AnalyticsReport = {
+  kpis: {
+    wauHint: number;
+    registered: number;
+    freeUsers: number;
+    buyers: number;
+    starters: number;
+    freeToUnlockRate: number;
+    unlockToSponsorRate: number;
+    unlocks: number;
+    sponsoredGrants: number;
+    sponsorships: number;
+    revenueTzs: number;
+    unlockRevenueTzs: number;
+    sadaqahRevenueTzs: number;
+    d7Retention: number | null;
+    d30Retention: number | null;
+    d7Cohort: number;
+    d30Cohort: number;
+    completionRate: number;
+    avgStreak: number;
+    events: number;
+  };
+  funnel: { step: string; stepSw: string; value: number }[];
+  daily: AnalyticsDaily[];
+  rails: { name: string; count: number; revenueTzs: number }[];
+  priceBands: { band: string; unlocks: number; revenueTzs: number }[];
+  series: AnalyticsSeriesRow[];
+  insights: AnalyticsInsight[];
 };
 
 export type Episode = {
@@ -67,6 +185,9 @@ export type Episode = {
   posterUrl?: string | null;
   isFree: boolean;              // false = VIP locked in player
   views: number;
+  likes?: number;
+  likedByMe?: boolean;
+  shareCount?: number;
   published: boolean;
   authorName?: string;
   authorPhone?: string;
@@ -118,6 +239,7 @@ export type Comment = {
   userAvatar?: string;
   text: string;
   likes: number;
+  likedByMe?: boolean;
   createdAt: string;
   hidden?: boolean;
   parentId?: string;
@@ -229,6 +351,11 @@ export type SessionUser = {
   role: Role;
   language: string;
   subscriptionStatus?: "ACTIVE" | "EXPIRED" | "FREE_TIER";
+  plan?: SubscriptionPlan;
+  subscriptionEndDate?: string;
+  subscriptionPlanNameSw?: string;
+  streakDays?: number;
+  badges?: string[];
 };
 
 export type SeriesCard = {
@@ -247,4 +374,8 @@ export type SeriesCard = {
   categorySlug: string;
   views?: number;
   likes?: number;
+  unlockPriceTzs?: number;
+  isStoryOfWeek?: boolean;
+  owned?: boolean;
+  sponsoredPlays?: number;
 };

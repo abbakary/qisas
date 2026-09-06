@@ -38,6 +38,9 @@ export default function SubscriptionsAdminPage() {
     });
   }, []);
 
+  const unlocks = db.unlocks.all().filter((u) => u.kind !== "SPONSORED_GRANT");
+  const gifts = db.sponsorships.findMany();
+  const unlockRevenue = unlocks.reduce((sum, u) => sum + (u.amountTzs || 0), 0) + gifts.reduce((sum, g) => sum + (g.amountTzs || 0), 0);
   const totalRevenue = db.subscriptions.totalRevenue();
   const activeCount = db.subscriptions.activeCount();
 
@@ -180,10 +183,10 @@ export default function SubscriptionsAdminPage() {
         <div>
           <h1 className="font-display text-2xl font-bold text-deep-green flex items-center gap-2">
             <CreditCard className="h-6 w-6 text-gold" />
-            VIP Subscriptions & Monetization
+            Payments, unlocks & VIP
           </h1>
           <p className="text-[13px] text-muted mt-0.5">
-            Section 7.5 Subscription Schema · M-Pesa, Tigo Pesa, Airtel Money receipts and Canonical Admin VIP Grants.
+            Phase 1 one-time unlocks and sadaqah appear here live. VIP plans remain optional.
           </p>
         </div>
 
@@ -199,9 +202,9 @@ export default function SubscriptionsAdminPage() {
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatsCard
-          title="Total Earnings (TZS)"
-          value={`${totalRevenue.toLocaleString()} TZS`}
-          subtext="Processed subscriptions"
+          title="Unlock + sadaqah"
+          value={`${unlockRevenue.toLocaleString()} TZS`}
+          subtext={`${unlocks.length} unlocks · ${gifts.length} gifts`}
           icon={<DollarSign className="h-4 w-4" />}
           variant="gold"
         />
@@ -219,11 +222,53 @@ export default function SubscriptionsAdminPage() {
           icon={<CreditCard className="h-4 w-4" />}
         />
         <StatsCard
-          title="Total Orders"
+          title="VIP orders"
           value={subscriptions.length}
-          subtext="All subscription records"
+          subtext={`${totalRevenue.toLocaleString()} TZS optional VIP`}
           icon={<CheckCircle className="h-4 w-4" />}
         />
+      </div>
+
+      <div className="rounded-2xl border border-line bg-white p-5 shadow-xs overflow-x-auto">
+        <div className="flex items-center justify-between pb-3 border-b border-line mb-3">
+          <div>
+            <h2 className="font-display text-base font-bold text-deep-green">Series unlocks</h2>
+            <p className="text-[11px] text-muted">M-Pesa / Tigo Pesa / Airtel Money — owned forever</p>
+          </div>
+          <span className="text-xs font-bold text-muted">{unlocks.length}</span>
+        </div>
+        {unlocks.length === 0 ? (
+          <p className="text-xs text-muted py-4">No unlock payments yet.</p>
+        ) : (
+          <table className="w-full text-xs">
+            <thead className="text-muted uppercase tracking-wider">
+              <tr>
+                <th className="text-left py-2">Reference</th>
+                <th className="text-left">Listener</th>
+                <th className="text-left">Series</th>
+                <th>Rail</th>
+                <th className="text-right">TZS</th>
+              </tr>
+            </thead>
+            <tbody>
+              {unlocks.map((u) => (
+                <tr key={u.id} className="border-t border-line">
+                  <td className="py-2">
+                    <div className="font-mono font-bold text-deep-green">{u.referenceCode}</div>
+                    <div className="text-[10px] text-muted">{u.kind}</div>
+                  </td>
+                  <td>
+                    <div className="font-bold text-ink">{u.userName || "Listener"}</div>
+                    <div className="font-mono text-[10px] text-muted">{u.userPhone}</div>
+                  </td>
+                  <td>{u.seriesTitleSw || db.series.findById(u.seriesId)?.titleSw || u.seriesId}</td>
+                  <td className="text-center">{u.paymentMethod}</td>
+                  <td className="text-right font-mono font-bold">{u.amountTzs.toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       {/* DataTable */}

@@ -28,6 +28,5 @@ export function RequireAdmin({ children }: { children: React.ReactNode }) {
 }
 
 export function RedirectRoot() {
-  const { user } = useAuth();
-  return <Navigate to={user ? "/home" : "/onboarding"} replace />;
+  return <Navigate to="/onboarding" replace />;
 }

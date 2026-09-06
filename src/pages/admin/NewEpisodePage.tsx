@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import {
   EPISODE_MAX_SEC,
@@ -9,6 +9,7 @@ import {
   fmtDuration,
 } from "../../lib/content-rules";
 import { db } from "../../lib/mock/db";
+import { prepareEpisodePoster } from "../../lib/media/episode-cover";
 
 export default function NewEpisodePage() {
   const navigate = useNavigate();
@@ -41,17 +42,54 @@ export default function NewEpisodePage() {
   const [titleSw, setTitleSw] = useState("");
   const [mediaType, setMediaType] = useState<"AUDIO" | "VIDEO">("AUDIO");
   const [file, setFile] = useState<File | null>(null);
+  const [source, setSource] = useState<"file" | "url">("file");
+  const [mediaUrl, setMediaUrl] = useState("");
+  const [isFree, setIsFree] = useState(nextOrder <= 3);
   const [mediaBlobUrl, setMediaBlobUrl] = useState<string | null>(null);
+  const [posterPreview, setPosterPreview] = useState<string | null>(null);
   const [duration, setDuration] = useState<number | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string; warnings?: string[] } | null>(null);
   const [orderEdited, setOrderEdited] = useState(false);
+  const posterFileRef = useRef<File | null>(null);
 
   const count = sel?.orders.length ?? 0;
   const atMax = count >= SERIES_MAX_EPISODES;
   const belowMin = count + 1 < SERIES_MIN_EPISODES;
   const effectiveOrder = orderEdited ? order : nextOrder;
   const orderClash = sel?.orders.includes(effectiveOrder) ?? false;
+
+  useEffect(() => {
+    posterFileRef.current = null;
+    if (!file) {
+      setPosterPreview(null);
+      return;
+    }
+    let created: string | null = null;
+    let alive = true;
+    prepareEpisodePoster({
+      file,
+      mediaType: file.type.startsWith("video") ? "VIDEO" : mediaType,
+      order: effectiveOrder,
+      title: titleSw || title || `Kipindi ${effectiveOrder}`,
+      seriesTitle: sel?.titleSw || sel?.title,
+    })
+      .then((poster) => {
+        if (!alive || !poster) return;
+        posterFileRef.current = poster;
+        created = URL.createObjectURL(poster);
+        setPosterPreview(created);
+      })
+      .catch(() => {
+        if (alive) setPosterPreview(null);
+      });
+    return () => {
+      alive = false;
+      if (created) URL.revokeObjectURL(created);
+    };
+    // Preview once when the file is chosen — do not recapture on every title keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [file]);
 
   const durCheck = duration != null ? checkDuration(duration) : null;
 
@@ -67,6 +105,7 @@ export default function NewEpisodePage() {
     setMsg(null);
     if (!f) {
       setMediaBlobUrl(null);
+      setPosterPreview(null);
       return;
     }
     const url = URL.createObjectURL(f);
@@ -83,59 +122,54 @@ export default function NewEpisodePage() {
     else setMediaType("AUDIO");
   }
 
-  function submit(e: React.FormEvent) {
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!file || !sel) return;
+    if (!sel) return;
+    if (source === "file" && !file) return;
+    if (source === "url" && !mediaUrl.trim()) return;
     if (atMax) {
       setMsg({ ok: false, text: `"${sel.titleSw}" already has ${SERIES_MAX_EPISODES} episodes — the maximum.` });
       return;
     }
 
-    setProgress(15);
-    const interval = setInterval(() => {
-      setProgress((p) => {
-        if (!p || p >= 90) {
-          clearInterval(interval);
-          return 90;
-        }
-        return p + 25;
-      });
-    }, 150);
-
-    setTimeout(() => {
-      clearInterval(interval);
-      setProgress(100);
-
+    setProgress(35);
+    try {
       const warnings: string[] = [];
-      if (durCheck && !durCheck.ok && durCheck.message) {
-        warnings.push(durCheck.message);
-      }
+      if (durCheck && !durCheck.ok && durCheck.message) warnings.push(durCheck.message);
 
-      const created = db.episodes.create({
+      const created = await db.episodes.createFromSource({
         seriesId: sel.id,
         order: effectiveOrder,
         title: title || `Episode ${effectiveOrder}`,
         titleSw: titleSw || `Kipindi ${effectiveOrder}`,
         durationSec: duration ? Math.round(duration) : 120,
-        mediaUrl: mediaBlobUrl || "/media/seed/placeholder.wav",
         mediaType,
+        isFree,
         published: true,
+        file: source === "file" ? file : null,
+        mediaUrl: source === "url" ? mediaUrl.trim() : "",
+        poster: posterFileRef.current,
       });
 
-      setTimeout(() => {
-        setProgress(null);
-        setMsg({
-          ok: true,
-          text: `Episode ${created.order} (${created.titleSw}) uploaded successfully.`,
-          warnings,
-        });
-        setTitle("");
-        setTitleSw("");
-        setFile(null);
-        setDuration(null);
-        setOrderEdited(false);
-      }, 300);
-    }, 800);
+      setProgress(100);
+      setMsg({
+        ok: true,
+        text: `Episode ${created.order} (${created.titleSw}) saved. Source: ${source === "file" ? "PC upload" : "URL"}.`,
+        warnings,
+      });
+      setTitle("");
+      setTitleSw("");
+      setFile(null);
+      setMediaUrl("");
+      setDuration(null);
+      setPosterPreview(null);
+      setOrderEdited(false);
+      posterFileRef.current = null;
+    } catch (err: any) {
+      setMsg({ ok: false, text: err?.message || "Upload failed. Is the API running?" });
+    } finally {
+      setTimeout(() => setProgress(null), 400);
+    }
   }
 
   if (seriesList.length === 0) {
@@ -220,14 +254,52 @@ export default function NewEpisodePage() {
         </label>
 
         <label className="block">
-          <span className="field-label">Audio / video file</span>
-          <input
-            type="file"
-            accept="audio/*,video/*"
-            className="field-box"
-            onChange={(e) => onFile(e.target.files?.[0] ?? null)}
-            required
-          />
+          <span className="field-label">Media source</span>
+          <div className="mt-1 flex gap-2">
+            <button
+              type="button"
+              onClick={() => setSource("file")}
+              className={`rounded-xl px-3 py-1.5 text-xs font-bold border ${source === "file" ? "bg-deep-green text-white border-deep-green" : "bg-white border-line"}`}
+            >
+              Upload from PC
+            </button>
+            <button
+              type="button"
+              onClick={() => setSource("url")}
+              className={`rounded-xl px-3 py-1.5 text-xs font-bold border ${source === "url" ? "bg-deep-green text-white border-deep-green" : "bg-white border-line"}`}
+            >
+              Media URL
+            </button>
+          </div>
+        </label>
+
+        {source === "file" ? (
+          <label className="block">
+            <span className="field-label">Audio / video file</span>
+            <input
+              type="file"
+              accept="audio/*,video/*"
+              className="field-box"
+              onChange={(e) => onFile(e.target.files?.[0] ?? null)}
+              required={source === "file"}
+            />
+          </label>
+        ) : (
+          <label className="block">
+            <span className="field-label">Audio / video URL</span>
+            <input
+              className="field-box"
+              placeholder="https://… or /media/seed/file.wav"
+              value={mediaUrl}
+              onChange={(e) => setMediaUrl(e.target.value)}
+              required={source === "url"}
+            />
+          </label>
+        )}
+
+        <label className="flex items-center gap-2 text-xs font-bold text-deep-green">
+          <input type="checkbox" checked={isFree} onChange={(e) => setIsFree(e.target.checked)} />
+          Free episode (episodes 1–3 stay free; later episodes use a one-time unlock)
         </label>
 
         {file && (
@@ -247,6 +319,17 @@ export default function NewEpisodePage() {
                 {durCheck?.ok ? "within target." : durCheck?.message}
               </div>
             )}
+          </div>
+        )}
+
+        {posterPreview && (
+          <div className="block">
+            <span className="field-label">Cover (from video)</span>
+            <img
+              src={posterPreview}
+              alt="Episode cover preview"
+              className="mt-1 h-28 w-full rounded-xl object-cover border border-line shadow-sm"
+            />
           </div>
         )}
 
@@ -270,7 +353,7 @@ export default function NewEpisodePage() {
         )}
 
         <button
-          disabled={atMax || orderClash || progress != null || !file}
+          disabled={atMax || orderClash || progress != null || (source === "file" ? !file : !mediaUrl.trim())}
           className="btn-primary disabled:opacity-50"
         >
           {progress != null ? `Uploading ${progress}%` : "Upload episode"}

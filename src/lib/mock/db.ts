@@ -1,4 +1,4 @@
-import { ADAB, CATEGORIES, SERIES, durationForEpisode } from "./seed-data";
+import { api, getToken } from "../api/client";
 import type {
   AppNotification,
   Category,
@@ -10,6 +10,12 @@ import type {
   Role,
   Series,
   SeriesCard,
+  SessionUser,
+  AnalyticsReport,
+  MonetizeKpis,
+  Sponsorship,
+  StarterBundle,
+  SeriesUnlock,
   Subscription,
   SubscriptionPlan,
   SubscriptionStatus,
@@ -43,506 +49,63 @@ export type Store = {
   progress: Progress[];
   favorites: Favorite[];
   videoJobs: VideoJob[];
+  plans: Array<{ id: SubscriptionPlan; days: number; amountTzs: number; planNameSw: string; name: string }>;
+  unlocks: SeriesUnlock[];
+  allUnlocks: SeriesUnlock[];
+  sponsorships: Sponsorship[];
+  storyOfWeekId: string | null;
+  starterBundle: StarterBundle | null;
+  monetizeKpis: MonetizeKpis | null;
+  analytics: AnalyticsReport | null;
+  allProgress: Progress[];
 };
 
-const STORAGE_KEY = "qisas_react_store_v2";
-export const DB_STORE_KEY = STORAGE_KEY;
-const ADMIN_ID = "user-admin";
-const DEMO_ID = "user-demo";
+export const DB_STORE_KEY = "qisas_api_store";
 
 function nid(prefix: string) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function nowIso(offsetMs = 0) {
-  return new Date(Date.now() + offsetMs).toISOString();
+function nowIso() {
+  return new Date().toISOString();
 }
 
-function buildInitialStore(): Store {
-  const categories: Category[] = CATEGORIES.map((c) => ({
-    id: `cat-${c.slug}`,
-    slug: c.slug,
-    name: c.name,
-    nameSw: c.nameSw,
-    order: c.order,
-    image: `/media/categories/${c.slug}.jpg`,
-    iconName: c.slug,
-  }));
-
-  const catBySlug = Object.fromEntries(categories.map((c) => [c.slug, c]));
-  const series: Series[] = [];
-  const episodes: Episode[] = [];
-
-  SERIES.forEach((s, si) => {
-    const row: Series = {
-      id: `ser-${s.slug}`,
-      slug: s.slug,
-      title: s.title,
-      titleSw: s.titleSw,
-      description: s.description,
-      descriptionSw: s.descriptionSw,
-      categoryId: catBySlug[s.category]?.id ?? categories[0].id,
-      coverGradient: s.coverGradient,
-      image: `/media/series/${s.slug}.jpg`,
-      backdropImage: `/media/series/${s.slug}.jpg`,
-      featured: s.featured,
-      published: true,
-      views: 3400 + si * 420,
-      likes: 210 + si * 35,
-      seasonsCount: 1,
-      rating: 4.8 + (si % 3) * 0.1,
-      tags: ["hadithi", "quran", "visa", s.category],
-      createdAt: nowIso(-si * 86_400_000),
-    };
-    series.push(row);
-
-    const lockedFrom = s.episodeCount > 12 ? s.episodeCount - 1 : s.episodeCount + 1;
-    for (let i = 1; i <= s.episodeCount; i++) {
-      const fileName = `${s.slug}-ep${String(i).padStart(2, "0")}.wav`;
-      const rel = `/media/seed/${fileName}`;
-      episodes.push({
-        id: `ep-${s.slug}-${String(i).padStart(2, "0")}`,
-        seriesId: row.id,
-        seasonNumber: 1,
-        order: i,
-        title: `Episode ${i}`,
-        titleSw: s.episodeTitlesSw?.[i - 1] ?? `Kipindi ${i}`,
-        description: `Story part ${i} from authentic sources.`,
-        descriptionSw: `Sehemu ya ${i} kulingana na mapokezi sahihi.`,
-        durationSec: durationForEpisode(i + s.slug.length),
-        mediaUrl: rel,
-        mediaType: "AUDIO",
-        isFree: i <= 3 || i % 2 === 1, // first episodes free, rest VIP
-        views: Math.max(120, 1800 - i * 45),
-        published: i < lockedFrom,
-        authorName: "Ustadh Juma bin Salim",
-        authorPhone: "+255713000111",
-        createdAt: row.createdAt,
-      });
-    }
-  });
-
-  const gradKeys = ["teal", "forest", "gold", "deep", "olive", "emerald"];
-  const adabCat = catBySlug["dua-na-adabu"] ?? categories[4] ?? categories[0];
-  ADAB.forEach(([suffix, en, sw, ar], i) => {
-    series.push({
-      id: `ser-adabu-${suffix}`,
-      slug: `adabu-${suffix}`,
-      title: en,
-      titleSw: sw,
-      description: `Adab and etiquette of ${en.replace(/^Manners (of|toward) /i, "").toLowerCase()} — from the Qur'an and authentic Sunnah. (${ar})`,
-      descriptionSw: `${sw} kwa mujibu wa Qur'an na Sunnah sahihi.`,
-      categoryId: adabCat.id,
-      coverGradient: gradKeys[i % gradKeys.length],
-      image: `/media/series/adabu-${suffix}.jpg`,
-      backdropImage: `/media/series/adabu-${suffix}.jpg`,
-      featured: false,
-      published: true,
-      views: 890 + i * 85,
-      likes: 80 + i * 12,
-      seasonsCount: 1,
-      rating: 4.9,
-      tags: ["adabu", "maadili", "sunnah"],
-      createdAt: nowIso(-(SERIES.length + i) * 43_200_000),
-    });
-  });
-
-  const users: User[] = [
-    {
-      id: ADMIN_ID,
-      name: "Admin Bashir",
-      phone: "+255712345678",
-      email: "admin@qisas.local",
-      password: "admin1234",
-      role: "ADMIN",
-      language: "sw",
-      subscriptionStatus: "ACTIVE",
-      preferredQuality: "1080p",
-      dataSaverEnabled: false,
-      createdAt: nowIso(-45 * 86_400_000),
-    },
-    {
-      id: DEMO_ID,
-      name: "Kido Salim",
-      phone: "+255754987654",
-      email: "demo@qisas.local",
-      password: "demo1234",
-      role: "USER",
-      language: "sw",
-      subscriptionStatus: "ACTIVE",
-      preferredQuality: "720p",
-      dataSaverEnabled: true,
-      createdAt: nowIso(-20 * 86_400_000),
-    },
-    {
-      id: "user-fatma",
-      name: "Fatma Zahra",
-      phone: "+255788112233",
-      email: "fatma@qisas.org",
-      password: "user123",
-      role: "USER",
-      language: "sw",
-      subscriptionStatus: "ACTIVE",
-      preferredQuality: "auto",
-      dataSaverEnabled: false,
-      createdAt: nowIso(-12 * 86_400_000),
-    },
-    {
-      id: "user-ali",
-      name: "Ali Hassan",
-      phone: "+255655443322",
-      email: "ali@qisas.org",
-      password: "user123",
-      role: "USER",
-      language: "sw",
-      subscriptionStatus: "EXPIRED",
-      preferredQuality: "auto",
-      dataSaverEnabled: false,
-      createdAt: nowIso(-8 * 86_400_000),
-    },
-    {
-      id: "user-maryam",
-      name: "Maryam Kassim",
-      phone: "+255762009988",
-      email: "maryam@qisas.org",
-      password: "user123",
-      role: "USER",
-      language: "sw",
-      subscriptionStatus: "FREE_TIER",
-      preferredQuality: "auto",
-      dataSaverEnabled: true,
-      createdAt: nowIso(-3 * 86_400_000),
-    },
-  ];
-
-  const subscriptions: Subscription[] = [
-    {
-      id: "sub-seed-1",
-      userId: DEMO_ID,
-      userName: "Kido Salim",
-      userPhone: "+255754987654",
-      plan: "MONTHLY",
-      planNameSw: "Kifurushi cha Mwezi (Monthly VIP)",
-      amountTzs: 3500,
-      paymentMethod: "M-Pesa",
-      referenceCode: "MP240891A92B",
-      status: "ACTIVE",
-      startDate: nowIso(-10 * 86_400_000),
-      endDate: nowIso(20 * 86_400_000),
-      createdAt: nowIso(-10 * 86_400_000),
-    },
-    {
-      id: "sub-seed-2",
-      userId: "user-fatma",
-      userName: "Fatma Zahra",
-      userPhone: "+255788112233",
-      plan: "ANNUAL",
-      planNameSw: "Kifurushi cha Mwaka (Annual VIP)",
-      amountTzs: 25000,
-      paymentMethod: "Tigo Pesa",
-      referenceCode: "TP883199K2",
-      status: "ACTIVE",
-      startDate: nowIso(-5 * 86_400_000),
-      endDate: nowIso(360 * 86_400_000),
-      createdAt: nowIso(-5 * 86_400_000),
-    },
-    {
-      id: "sub-seed-3",
-      userId: ADMIN_ID,
-      userName: "Admin Bashir",
-      userPhone: "+255712345678",
-      plan: "VIP_LIFETIME",
-      planNameSw: "VIP wa Maisha (Lifetime VIP)",
-      amountTzs: 100000,
-      paymentMethod: "Admin Grant",
-      referenceCode: "GRANT-LIFETIME-ROOT",
-      status: "ACTIVE",
-      startDate: nowIso(-45 * 86_400_000),
-      endDate: nowIso(3600 * 86_400_000),
-      createdAt: nowIso(-45 * 86_400_000),
-    },
-    {
-      id: "sub-seed-4",
-      userId: "user-ali",
-      userName: "Ali Hassan",
-      userPhone: "+255655443322",
-      plan: "WEEKLY",
-      planNameSw: "Kifurushi cha Wiki (Weekly VIP)",
-      amountTzs: 1000,
-      paymentMethod: "Airtel Money",
-      referenceCode: "AIR4400192",
-      status: "EXPIRED",
-      startDate: nowIso(-16 * 86_400_000),
-      endDate: nowIso(-9 * 86_400_000),
-      createdAt: nowIso(-16 * 86_400_000),
-    },
-  ];
-
-  const musa = series.find((s) => s.slug === "musa-as");
-  const yusuf = series.find((s) => s.slug === "yusuf-as");
-  const nuh = series.find((s) => s.slug === "nuh-as");
-  const sira = series.find((s) => s.slug === "sira-makka");
-
-  const musaEps = musa ? episodes.filter((e) => e.seriesId === musa.id).sort((a, b) => a.order - b.order) : [];
-  const yusufEps = yusuf ? episodes.filter((e) => e.seriesId === yusuf.id).sort((a, b) => a.order - b.order) : [];
-
-  const comments: Comment[] = [
-    {
-      id: "cmt-1",
-      seriesId: musa?.id ?? "ser-musa-as",
-      episodeId: musaEps[0]?.id,
-      userId: DEMO_ID,
-      userName: "Kido Salim",
-      userPhone: "+255754987654",
-      text: "MashaAllah, hadithi imeelezwa kwa ufasaha sana na Kiswahili kizuri mno!",
-      likes: 18,
-      createdAt: nowIso(-3 * 86_400_000),
-    },
-    {
-      id: "cmt-2",
-      seriesId: yusuf?.id ?? "ser-yusuf-as",
-      episodeId: yusufEps[0]?.id,
-      userId: "user-fatma",
-      userName: "Fatma Zahra",
-      userPhone: "+255788112233",
-      text: "Ahsante sana kwa kazi nzuri. Hadithi ya Nabii Yusuf inafundisha subira kuu.",
-      likes: 24,
-      createdAt: nowIso(-2 * 86_400_000),
-    },
-    {
-      id: "cmt-3",
-      seriesId: musa?.id ?? "ser-musa-as",
-      userId: "user-ali",
-      userName: "Ali Hassan",
-      userPhone: "+255655443322",
-      text: "Tafadhali ongezeni sehemu zote za safari ya Musa na Khidhr haraka!",
-      likes: 7,
-      createdAt: nowIso(-1 * 86_400_000),
-    },
-    {
-      id: "cmt-4",
-      seriesId: musa?.id ?? "ser-musa-as",
-      userId: "user-ester",
-      userName: "ester mwatebela",
-      userPhone: "+255711009988",
-      text: "Maudhui mazuri sana, na sauti inasikika vizuri kabisa! Nimefurahia sana kuona historia hii.",
-      likes: 12,
-      createdAt: nowIso(-10 * 3600_000),
-    },
-    {
-      id: "cmt-5",
-      seriesId: musa?.id ?? "ser-musa-as",
-      userId: ADMIN_ID,
-      userName: "Qisas Team",
-      userPhone: "+255712345678",
-      text: "Ahsante sana Ester! Tunashukuru kwa maoni yako. Endelea kufurahia msururu mzima.",
-      likes: 5,
-      createdAt: nowIso(-8 * 3600_000),
-      parentId: "cmt-4",
-    },
-  ];
-
-  const communityUploads: CommunityUpload[] = [
-    {
-      id: "cu-1",
-      userId: "user-fatma",
-      userName: "Fatma Zahra",
-      userPhone: "+255788112233",
-      uploaderName: "Fatma Zahra",
-      uploaderPhone: "+255788112233",
-      authorName: "Ustadh Hamza Omar",
-      authorPhone: "+255713445566",
-      verifiedSpeaker: false,
-      title: "Lessons from Surah Luqman",
-      titleSw: "Mafunzo ya Surah Luqman kwa Watoto",
-      category: "watoto",
-      description: "A beautiful audio presentation explaining Luqman's golden advice to his son.",
-      descriptionSw: "Darsa fupi yenye mafunzo mazito ya Luqman kwa mtoto wake kuhusu hekima na tauhidi.",
-      mediaUrl: "/media/seed/wema-kwa-watoto-ep01.wav",
-      mediaType: "AUDIO",
-      durationSec: 145,
-      likes: 42,
-      views: 310,
-      status: "APPROVED",
-      createdAt: nowIso(-4 * 86_400_000),
-    },
-    {
-      id: "cu-2",
-      userId: "user-ali",
-      userName: "Ali Hassan",
-      userPhone: "+255655443322",
-      uploaderName: "Ali Hassan",
-      uploaderPhone: "+255655443322",
-      authorName: "Sheikh Abdulrahman",
-      authorPhone: "+255778990011",
-      verifiedSpeaker: false,
-      title: "Virtues of Seeking Islamic Knowledge",
-      titleSw: "Fadhila za Kutafuta Elimu ya Dini",
-      category: "wanazuoni",
-      description: "Audio reminder on Islamic scholarship tradition in East Africa.",
-      descriptionSw: "Mawaidha kuhusu safari za wanazuoni wa Kiswahili katika kusaka ilim.",
-      mediaUrl: "/media/seed/imam-al-bukhari-ep01.wav",
-      mediaType: "AUDIO",
-      durationSec: 160,
-      likes: 12,
-      views: 89,
-      status: "PENDING",
-      createdAt: nowIso(-1 * 86_400_000),
-    },
-    {
-      id: "cu-3",
-      userId: ADMIN_ID,
-      userName: "Admin Bashir",
-      userPhone: "+255712345678",
-      uploaderName: "Admin Bashir",
-      authorName: "Qisas Studio",
-      verifiedSpeaker: true,
-      title: "Dua during Ramadan & Virtues",
-      titleSw: "Dua za Ramadhani na Fadhila Zake",
-      category: "dua-na-adabu",
-      description: "Recitation of authentic supplications with Swahili commentary.",
-      descriptionSw: "Dua sahihi kutoka Sunnah kwa ajili ya usiku wa Lailatul Qadr.",
-      mediaUrl: "/media/seed/placeholder.wav",
-      mediaType: "AUDIO",
-      durationSec: 110,
-      likes: 65,
-      views: 520,
-      status: "APPROVED",
-      createdAt: nowIso(-7 * 86_400_000),
-    },
-  ];
-
-  const notifications: AppNotification[] = [
-    {
-      id: "notif-1",
-      targetUserId: "ALL",
-      title: "Ramadan Special Series Live!",
-      titleSw: "Mfululizo Maalum wa Ramadhani Umeanza!",
-      message: "Listen to the newly published Seerah episodes and Duas for blessed nights.",
-      messageSw: "Sikiliza vipindi vipya vya Sira ya Mtume (saw) na Dua za usiku wa cheo.",
-      type: "SYSTEM",
-      read: false,
-      actionUrl: "/categories",
-      createdAt: nowIso(-2 * 86_400_000),
-    },
-    {
-      id: "notif-2",
-      targetUserId: DEMO_ID,
-      targetPhone: "+255754987654",
-      title: "VIP Activated Successfully",
-      titleSw: "Kifurushi Chako cha VIP Kimewezeshwa",
-      message: "Thank you for subscribing to Monthly VIP. Enjoy unlimited ad-free access.",
-      messageSw: "Asante kwa kujiunga na Kifurushi cha Mwezi. Furahia vipindi vyote bila kikomo.",
-      type: "PAYMENT",
-      read: true,
-      actionUrl: "/profile",
-      createdAt: nowIso(-10 * 86_400_000),
-    },
-    {
-      id: "notif-3",
-      targetUserId: "ALL",
-      title: "New Prophet Musa (AS) Episode",
-      titleSw: "Kipindi Kipya: Nabii Musa na Wamisri",
-      message: "Episode 4 of Prophet Musa is now available in high quality audio.",
-      messageSw: "Kipindi cha 4 cha Nabii Musa kimeshawekwa mtandaoni kwa sauti safi.",
-      type: "NEW_EPISODE",
-      read: false,
-      actionUrl: "/series/musa-as",
-      createdAt: nowIso(-1 * 86_400_000),
-    },
-  ];
-
-  const progress: Progress[] = [];
-  if (musaEps.length >= 4) {
-    musaEps.slice(0, 3).forEach((e, i) => {
-      progress.push({
-        id: `prog-demo-musa-${i + 1}`,
-        userId: DEMO_ID,
-        episodeId: e.id,
-        positionSec: 0,
-        completed: true,
-        updatedAt: nowIso(-(4 - i) * 3_600_000),
-      });
-    });
-    progress.push({
-      id: "prog-demo-musa-4",
-      userId: DEMO_ID,
-      episodeId: musaEps[3].id,
-      positionSec: 42,
-      completed: false,
-      updatedAt: nowIso(-1_800_000),
-    });
-  }
-
-  if (yusufEps.length >= 2) {
-    progress.push({
-      id: "prog-demo-yusuf-2",
-      userId: DEMO_ID,
-      episodeId: yusufEps[1].id,
-      positionSec: 30,
-      completed: false,
-      updatedAt: nowIso(-3_600_000),
-    });
-  }
-
-  const favorites: Favorite[] = [];
-  if (nuh) favorites.push({ id: "fav-demo-nuh", userId: DEMO_ID, seriesId: nuh.id, createdAt: nowIso(-2 * 86_400_000) });
-  if (sira) favorites.push({ id: "fav-demo-sira", userId: DEMO_ID, seriesId: sira.id, createdAt: nowIso(-86_400_000) });
-
+function emptyStore(): Store {
   return {
-    categories,
-    series,
-    episodes,
-    users,
-    subscriptions,
-    comments,
-    communityUploads,
-    notifications,
-    progress,
-    favorites,
+    categories: [],
+    series: [],
+    episodes: [],
+    users: [],
+    subscriptions: [],
+    comments: [],
+    communityUploads: [],
+    notifications: [],
+    progress: [],
+    favorites: [],
     videoJobs: [],
+    plans: [],
+    unlocks: [],
+    allUnlocks: [],
+    sponsorships: [],
+    storyOfWeekId: null,
+    starterBundle: null,
+    monetizeKpis: null,
+    analytics: null,
+    allProgress: [],
   };
 }
 
-function loadStore(): Store {
-  try {
-    const raw = typeof window !== "undefined" ? window.localStorage.getItem(STORAGE_KEY) : null;
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed.categories && parsed.series && parsed.episodes) {
-        // Ensure new collections exist in case of upgrade
-        if (!parsed.subscriptions) parsed.subscriptions = [];
-        if (!parsed.comments) parsed.comments = [];
-        if (!parsed.communityUploads) parsed.communityUploads = [];
-        if (!parsed.notifications) parsed.notifications = [];
-        return parsed;
-      }
-    }
-  } catch (e) {
-    console.error("Failed to load store from localStorage", e);
-  }
-  const initial = buildInitialStore();
-  saveStore(initial);
-  return initial;
-}
-
-function saveStore(s: Store) {
-  try {
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
-    }
-  } catch (e) {
-    console.error("Failed to save store to localStorage", e);
-  }
-}
-
-let store: Store = loadStore();
-
+let store: Store = emptyStore();
 const listeners = new Set<() => void>();
 
 function notify() {
-  saveStore(store);
   listeners.forEach((fn) => fn());
+}
+
+function fire(path: string, init?: RequestInit) {
+  void api(path, init).catch((err) => {
+    console.warn("API mutation failed", path, err);
+  });
 }
 
 export function subscribeDb(fn: () => void) {
@@ -552,9 +115,80 @@ export function subscribeDb(fn: () => void) {
   };
 }
 
-export function resetStoreToSeed() {
-  store = buildInitialStore();
+export async function hydrate() {
+  const data = await api<any>("/api/bootstrap");
+  store.categories = data.categories || [];
+  store.series = data.series || [];
+  store.episodes = data.episodes || [];
+  if (Array.isArray(data.comments)) {
+    store.comments = data.comments;
+  }
+  store.plans = data.plans || [];
+  store.favorites = data.favorites || [];
+  store.progress = data.progress || [];
+  store.communityUploads = data.communityUploads || [];
+  store.videoJobs = data.videoJobs || [];
+  store.notifications = data.allNotifications || data.notifications || [];
+  store.subscriptions = data.subscriptions || data.mySubscriptions || [];
+  store.users = data.users || [];
+  store.unlocks = data.unlocks || [];
+  if (Array.isArray(data.allUnlocks)) {
+    store.allUnlocks = data.allUnlocks;
+  } else {
+    const byId = new Map(store.allUnlocks.map((u) => [u.id, u]));
+    for (const u of store.unlocks) byId.set(u.id, u);
+    store.allUnlocks = Array.from(byId.values());
+  }
+  if (Array.isArray(data.sponsorships)) {
+    store.sponsorships = data.sponsorships;
+  }
+  if (data.monetizeKpis) {
+    store.monetizeKpis = data.monetizeKpis;
+  }
+  if (data.analytics) {
+    store.analytics = data.analytics;
+  }
+  if (Array.isArray(data.allProgress)) {
+    store.allProgress = data.allProgress;
+  }
+  store.storyOfWeekId = data.storyOfWeekId || null;
+  store.starterBundle = data.starterBundle || store.starterBundle || {
+    id: "STARTER_BUNDLE",
+    seriesCount: 3,
+    amountTzs: 2000,
+    name: "Starter bundle",
+    planNameSw: "Kifurushi cha kuanza — 3 hadithi kwa bei ya 2",
+  };
+  if (data.me && !store.users.some((u) => u.id === data.me.id)) {
+    store.users.push({
+      id: data.me.id,
+      name: data.me.name,
+      phone: data.me.phone || "",
+      email: data.me.email,
+      password: "",
+      role: data.me.role,
+      language: data.me.language,
+      subscriptionStatus: data.me.subscriptionStatus,
+      createdAt: nowIso(),
+    });
+  }
   notify();
+  return store;
+}
+
+export async function initDb() {
+  try {
+    await hydrate();
+  } catch (err) {
+    console.warn("API bootstrap failed, UI will retry after login", err);
+    store = emptyStore();
+    notify();
+  }
+}
+
+export async function resetStoreToSeed() {
+  await api("/api/system/reset", { method: "POST" });
+  await hydrate();
   return store;
 }
 
@@ -580,21 +214,19 @@ export function toSeriesCard(s: Series): SeriesCard {
     categorySlug: category?.slug ?? "general",
     views: s.views,
     likes: s.likes,
+    unlockPriceTzs: s.unlockPriceTzs,
+    isStoryOfWeek: Boolean(s.isStoryOfWeek || (store.storyOfWeekId && s.id === store.storyOfWeekId)),
+    owned: store.unlocks.some((u) => u.seriesId === s.id && u.status === "ACTIVE"),
+    sponsoredPlays: s.sponsoredPlays,
   };
 }
 
 export function normalizePhone(raw: string): string {
   const clean = raw.trim();
   const digits = clean.replace(/\D/g, "");
-  if (digits.startsWith("255") && digits.length === 12) {
-    return `+${digits}`;
-  }
-  if (digits.startsWith("0") && digits.length === 10) {
-    return `+255${digits.slice(1)}`;
-  }
-  if (digits.length === 9) {
-    return `+255${digits}`;
-  }
+  if (digits.startsWith("255") && digits.length === 12) return `+${digits}`;
+  if (digits.startsWith("0") && digits.length === 10) return `+255${digits.slice(1)}`;
+  if (digits.length === 9) return `+255${digits}`;
   if (clean.startsWith("+")) return clean;
   return clean;
 }
@@ -605,10 +237,7 @@ export function matchPhone(storedPhone?: string, queryPhone?: string): boolean {
   const qDigits = queryPhone.replace(/\D/g, "");
   if (!sDigits || !qDigits) return false;
   if (sDigits === qDigits) return true;
-  // Match last 9 digits (local Tanzanian phone without prefix 0 or 255)
-  if (sDigits.length >= 9 && qDigits.length >= 9) {
-    return sDigits.slice(-9) === qDigits.slice(-9);
-  }
+  if (sDigits.length >= 9 && qDigits.length >= 9) return sDigits.slice(-9) === qDigits.slice(-9);
   return false;
 }
 
@@ -634,6 +263,7 @@ export const db = {
       const row: Category = { ...data, id: nid("cat") };
       store.categories.push(row);
       notify();
+      fire("/api/categories", { method: "POST", body: JSON.stringify(row) });
       return row;
     },
     updateBySlug(slug: string, data: Partial<Category>) {
@@ -641,6 +271,7 @@ export const db = {
       if (row) {
         Object.assign(row, data);
         notify();
+        fire(`/api/categories/${row.id}`, { method: "PATCH", body: JSON.stringify(data) });
       }
       return row ?? null;
     },
@@ -649,6 +280,7 @@ export const db = {
       if (idx < 0) return null;
       const [deleted] = store.categories.splice(idx, 1);
       notify();
+      fire(`/api/categories/${id}`, { method: "DELETE" });
       return deleted;
     },
     seriesCount(id: string) {
@@ -713,6 +345,7 @@ export const db = {
       };
       store.series.push(row);
       notify();
+      fire("/api/series", { method: "POST", body: JSON.stringify(row) });
       return row;
     },
     updateBySlug(slug: string, data: Partial<Series>) {
@@ -720,6 +353,7 @@ export const db = {
       if (row) {
         Object.assign(row, data);
         notify();
+        fire(`/api/series/${row.id}`, { method: "PATCH", body: JSON.stringify(data) });
       }
       return row ?? null;
     },
@@ -728,6 +362,7 @@ export const db = {
       if (row) {
         row.featured = !row.featured;
         notify();
+        fire(`/api/series/${id}/toggle-featured`, { method: "POST" });
         return row.featured;
       }
       return false;
@@ -737,6 +372,7 @@ export const db = {
       if (row) {
         row.published = !row.published;
         notify();
+        fire(`/api/series/${id}/toggle-published`, { method: "POST" });
         return row.published;
       }
       return false;
@@ -746,13 +382,13 @@ export const db = {
       if (row) {
         row.views = (row.views || 0) + 1;
         notify();
+        fire(`/api/series/${id}/view`, { method: "POST" });
       }
     },
     delete(id: string) {
       const idx = store.series.findIndex((s) => s.id === id);
       if (idx < 0) return null;
       const [deleted] = store.series.splice(idx, 1);
-      // Cascade delete episodes
       const epIds = store.episodes.filter((e) => e.seriesId === id).map((e) => e.id);
       store.episodes = store.episodes.filter((e) => e.seriesId !== id);
       store.progress = store.progress.filter((p) => !epIds.includes(p.episodeId));
@@ -760,16 +396,31 @@ export const db = {
       store.comments = store.comments.filter((c) => c.seriesId !== id);
       store.videoJobs = store.videoJobs.filter((j) => j.seriesId !== id);
       notify();
+      fire(`/api/series/${id}`, { method: "DELETE" });
       return deleted;
     },
-    toggleLike(id: string) {
+    async toggleLike(id: string) {
       const row = store.series.find((s) => s.id === id);
-      if (row) {
-        row.likes = (row.likes || 0) + 1;
+      if (!row) return { likes: 0, liked: false };
+      const prevLikes = row.likes || 0;
+      const prevLiked = !!row.likedByMe;
+      const liked = !prevLiked;
+      row.likedByMe = liked;
+      row.likes = Math.max(0, prevLikes + (liked ? 1 : -1));
+      notify();
+      if (!getToken()) return { likes: row.likes, liked };
+      try {
+        const res = await api<{ liked: boolean; likes: number }>(`/api/series/${id}/like`, { method: "POST" });
+        row.likes = res.likes ?? row.likes;
+        row.likedByMe = res.liked ?? liked;
         notify();
-        return row.likes;
+        return { likes: row.likes, liked: !!row.likedByMe };
+      } catch (err) {
+        row.likes = prevLikes;
+        row.likedByMe = prevLiked;
+        notify();
+        throw err;
       }
-      return 0;
     },
     episodeCount(id: string) {
       return store.episodes.filter((e) => e.seriesId === id).length;
@@ -818,13 +469,49 @@ export const db = {
       };
       store.episodes.push(row);
       notify();
+      fire("/api/episodes", { method: "POST", body: JSON.stringify(row) });
       return row;
+    },
+    async createFromSource(data: {
+      seriesId: string;
+      order: number;
+      title: string;
+      titleSw: string;
+      mediaType: "AUDIO" | "VIDEO";
+      durationSec: number;
+      isFree?: boolean;
+      published?: boolean;
+      description?: string;
+      descriptionSw?: string;
+      file?: File | null;
+      poster?: File | null;
+      mediaUrl?: string;
+    }) {
+      const form = new FormData();
+      form.append("seriesId", data.seriesId);
+      form.append("order", String(data.order));
+      form.append("title", data.title);
+      form.append("titleSw", data.titleSw);
+      form.append("mediaType", data.mediaType);
+      form.append("durationSec", String(data.durationSec));
+      form.append("isFree", String(data.isFree ?? true));
+      form.append("published", String(data.published ?? true));
+      form.append("description", data.description || "");
+      form.append("descriptionSw", data.descriptionSw || "");
+      form.append("mediaUrl", data.mediaUrl || "");
+      if (data.file) form.append("file", data.file);
+      if (data.poster) form.append("poster", data.poster);
+      const created = await api<Episode>("/api/episodes/upload", { method: "POST", body: form });
+      store.episodes.push(created);
+      notify();
+      return created;
     },
     update(id: string, data: Partial<Episode>) {
       const row = store.episodes.find((e) => e.id === id);
       if (row) {
         Object.assign(row, data);
         notify();
+        fire(`/api/episodes/${id}`, { method: "PATCH", body: JSON.stringify(data) });
       }
       return row ?? null;
     },
@@ -833,6 +520,7 @@ export const db = {
       if (row) {
         row.isFree = !row.isFree;
         notify();
+        fire(`/api/episodes/${id}/toggle-free`, { method: "POST" });
         return row.isFree;
       }
       return false;
@@ -842,6 +530,7 @@ export const db = {
       if (row) {
         row.published = !row.published;
         notify();
+        fire(`/api/episodes/${id}/toggle-published`, { method: "POST" });
         return row.published;
       }
       return false;
@@ -851,7 +540,18 @@ export const db = {
       if (row) {
         row.views = (row.views || 0) + 1;
         notify();
+        fire(`/api/episodes/${id}/view`, { method: "POST" });
       }
+    },
+    toggleLike(id: string) {
+      const row = store.episodes.find((e) => e.id === id);
+      if (!row) return { likes: 0, liked: false };
+      const liked = !row.likedByMe;
+      row.likedByMe = liked;
+      row.likes = Math.max(0, (row.likes || 0) + (liked ? 1 : -1));
+      notify();
+      fire(`/api/episodes/${id}/like`, { method: "POST" });
+      return { likes: row.likes || 0, liked };
     },
     delete(id: string) {
       const idx = store.episodes.findIndex((e) => e.id === id);
@@ -860,6 +560,7 @@ export const db = {
       store.progress = store.progress.filter((p) => p.episodeId !== id);
       store.comments = store.comments.filter((c) => c.episodeId !== id);
       notify();
+      fire(`/api/episodes/${id}`, { method: "DELETE" });
       return row;
     },
   },
@@ -887,8 +588,7 @@ export const db = {
       return store.users.find((u) => u.email.toLowerCase() === email.toLowerCase().trim()) ?? null;
     },
     findByPhone(phone: string) {
-      const clean = phone.trim();
-      return store.users.find((u) => matchPhone(u.phone, clean)) ?? null;
+      return store.users.find((u) => matchPhone(u.phone, phone.trim())) ?? null;
     },
     count() {
       return store.users.length;
@@ -912,6 +612,17 @@ export const db = {
       };
       store.users.push(row);
       notify();
+      fire("/api/users", {
+        method: "POST",
+        body: JSON.stringify({
+          name: row.name,
+          phone: row.phone,
+          email: row.email,
+          password: data.password,
+          role: row.role,
+          language: row.language,
+        }),
+      });
       return row;
     },
     update(id: string, data: Partial<User>) {
@@ -919,6 +630,7 @@ export const db = {
       if (user) {
         Object.assign(user, data);
         notify();
+        fire(`/api/users/${id}`, { method: "PATCH", body: JSON.stringify(data) });
       }
       return user ?? null;
     },
@@ -927,6 +639,7 @@ export const db = {
       if (user) {
         user.role = role;
         notify();
+        fire(`/api/users/${id}`, { method: "PATCH", body: JSON.stringify({ role }) });
       }
       return user ?? null;
     },
@@ -938,6 +651,7 @@ export const db = {
       store.progress = store.progress.filter((p) => p.userId !== id);
       store.favorites = store.favorites.filter((f) => f.userId !== id);
       notify();
+      fire(`/api/users/${id}`, { method: "DELETE" });
       return row;
     },
   },
@@ -961,24 +675,26 @@ export const db = {
     findById(id: string) {
       return store.subscriptions.find((s) => s.id === id) ?? null;
     },
+    findForUser(userId: string) {
+      return store.subscriptions.filter((s) => s.userId === userId);
+    },
+    plans() {
+      return store.plans;
+    },
     grantVIP(userId: string, plan: SubscriptionPlan) {
       const user = store.users.find((u) => u.id === userId);
-      if (!user) return null;
-      const planConfigs = {
-        WEEKLY: { days: 7, amountTzs: 1000, planNameSw: "Kifurushi cha Wiki (Weekly VIP)" },
-        MONTHLY: { days: 30, amountTzs: 3500, planNameSw: "Kifurushi cha Mwezi (Monthly VIP)" },
-        ANNUAL: { days: 365, amountTzs: 25000, planNameSw: "Kifurushi cha Mwaka (Annual VIP)" },
-        VIP_LIFETIME: { days: 3650, amountTzs: 100000, planNameSw: "VIP wa Maisha (Lifetime VIP)" },
+      const cfg = store.plans.find((p) => p.id === plan) || {
+        days: 30,
+        amountTzs: 3500,
+        planNameSw: "Kifurushi cha Mwezi",
       };
-      const cfg = planConfigs[plan] ?? planConfigs.MONTHLY;
       const start = new Date();
       const end = new Date(start.getTime() + cfg.days * 86_400_000);
-
       const sub: Subscription = {
         id: nid("sub"),
-        userId: user.id,
-        userName: user.name,
-        userPhone: user.phone || "+255700000000",
+        userId,
+        userName: user?.name || "",
+        userPhone: user?.phone || "",
         plan,
         planNameSw: cfg.planNameSw,
         amountTzs: cfg.amountTzs,
@@ -990,9 +706,16 @@ export const db = {
         createdAt: start.toISOString(),
       };
       store.subscriptions.unshift(sub);
-      user.subscriptionStatus = "ACTIVE";
+      if (user) user.subscriptionStatus = "ACTIVE";
       notify();
+      fire("/api/subscriptions/grant", { method: "POST", body: JSON.stringify({ userId, plan }) });
       return sub;
+    },
+    request(plan: SubscriptionPlan, paymentMethod: Subscription["paymentMethod"] = "M-Pesa") {
+      void api("/api/subscriptions/me", {
+        method: "POST",
+        body: JSON.stringify({ plan, paymentMethod }),
+      }).then(() => hydrate());
     },
     updateStatus(id: string, status: SubscriptionStatus) {
       const sub = store.subscriptions.find((s) => s.id === id);
@@ -1005,10 +728,11 @@ export const db = {
             const hasOtherActive = store.subscriptions.some(
               (o) => o.userId === user.id && o.id !== id && o.status === "ACTIVE",
             );
-            if (!hasOtherActive) user.subscriptionStatus = "EXPIRED";
+            if (!hasOtherActive) user.subscriptionStatus = status === "EXPIRED" ? "EXPIRED" : "FREE_TIER";
           }
         }
         notify();
+        fire(`/api/subscriptions/${id}`, { method: "PATCH", body: JSON.stringify({ status }) });
       }
       return sub ?? null;
     },
@@ -1017,27 +741,123 @@ export const db = {
       if (idx < 0) return null;
       const [deleted] = store.subscriptions.splice(idx, 1);
       notify();
+      fire(`/api/subscriptions/${id}`, { method: "DELETE" });
       return deleted;
     },
     totalRevenue() {
-      return store.subscriptions.reduce((sum, s) => sum + (s.amountTzs || 0), 0);
+      const unlockRev = store.allUnlocks
+        .filter((u) => u.kind !== "SPONSORED_GRANT")
+        .reduce((sum, u) => sum + (u.amountTzs || 0), 0);
+      const sadaqah = store.sponsorships.reduce((sum, s) => sum + (s.amountTzs || 0), 0);
+      return store.subscriptions.reduce((sum, s) => sum + (s.amountTzs || 0), 0) + unlockRev + sadaqah;
     },
     activeCount() {
       return store.subscriptions.filter((s) => s.status === "ACTIVE").length;
     },
   },
 
+  unlocks: {
+    mine() {
+      return [...store.unlocks];
+    },
+    all() {
+      return [...store.allUnlocks].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+    },
+    owns(seriesId: string) {
+      return store.unlocks.some((u) => u.seriesId === seriesId && u.status === "ACTIVE");
+    },
+    purchaseCount(seriesId: string) {
+      return store.allUnlocks.filter((u) => u.seriesId === seriesId && u.kind !== "SPONSORED_GRANT").length;
+    },
+    async request(body: {
+      seriesId?: string;
+      kind?: "PURCHASE" | "BUNDLE";
+      paymentMethod?: string;
+      phone?: string;
+    }) {
+      const res = await api<{ unlocks: SeriesUnlock[]; amountTzs: number }>("/api/unlocks", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      for (const row of res.unlocks || []) {
+        if (!store.unlocks.some((u) => u.id === row.id)) store.unlocks.unshift(row);
+        const idx = store.allUnlocks.findIndex((u) => u.id === row.id);
+        if (idx >= 0) store.allUnlocks[idx] = row;
+        else store.allUnlocks.unshift(row);
+      }
+      notify();
+      await hydrate();
+      return res;
+    },
+  },
+
+  sponsorships: {
+    findMany() {
+      return [...store.sponsorships].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+    },
+    async create(body: {
+      seriesId: string;
+      paymentMethod?: string;
+      anonymous?: boolean;
+      targetLabel?: string;
+    }) {
+      const res = await api<Sponsorship>("/api/sponsorships", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      await hydrate();
+      return res;
+    },
+  },
+
+  monetize: {
+    storyOfWeekId() {
+      return store.storyOfWeekId;
+    },
+    storyOfWeek() {
+      if (!store.storyOfWeekId) return store.series.find((s) => s.isStoryOfWeek) || null;
+      return store.series.find((s) => s.id === store.storyOfWeekId) || null;
+    },
+    starterBundle() {
+      return store.starterBundle;
+    },
+    kpis() {
+      return store.monetizeKpis;
+    },
+    analytics() {
+      return store.analytics;
+    },
+    async refreshAdmin() {
+      if (!getToken()) return;
+      const [unlocks, gifts, kpis, analytics] = await Promise.allSettled([
+        api<SeriesUnlock[]>("/api/unlocks"),
+        api<Sponsorship[]>("/api/sponsorships"),
+        api<MonetizeKpis>("/api/monetize/kpis"),
+        api<AnalyticsReport>("/api/monetize/analytics"),
+      ]);
+      if (unlocks.status === "fulfilled") store.allUnlocks = unlocks.value || [];
+      if (gifts.status === "fulfilled") store.sponsorships = gifts.value || [];
+      if (kpis.status === "fulfilled") store.monetizeKpis = kpis.value || store.monetizeKpis;
+      if (analytics.status === "fulfilled") store.analytics = analytics.value || store.analytics;
+      notify();
+    },
+  },
+
   comments: {
+    async loadForSeries(seriesId: string) {
+      const rows = await api<Comment[]>(`/api/comments?seriesId=${encodeURIComponent(seriesId)}`);
+      const keep = store.comments.filter((c) => c.seriesId !== seriesId);
+      store.comments = [...rows, ...keep];
+      notify();
+      return rows;
+    },
     findMany(opts?: { seriesId?: string; episodeId?: string; parentId?: string | null; q?: string; includeHidden?: boolean }) {
       let rows = [...store.comments];
       if (opts?.seriesId) rows = rows.filter((c) => c.seriesId === opts.seriesId);
       if (opts?.episodeId) rows = rows.filter((c) => c.episodeId === opts.episodeId);
       if (opts?.parentId !== undefined) {
-        if (opts.parentId === null) {
-          rows = rows.filter((c) => !c.parentId);
-        } else {
-          rows = rows.filter((c) => c.parentId === opts.parentId);
-        }
+        if (opts.parentId === null) rows = rows.filter((c) => !c.parentId);
+        else rows = rows.filter((c) => c.parentId === opts.parentId);
       }
       if (!opts?.includeHidden) rows = rows.filter((c) => !c.hidden);
       if (opts?.q) {
@@ -1046,31 +866,59 @@ export const db = {
       }
       return rows.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
     },
-    create(data: Omit<Comment, "id" | "createdAt">) {
-      const row: Comment = {
-        ...data,
-        id: nid("cmt"),
-        likes: data.likes ?? 0,
-        createdAt: nowIso(),
-      };
+    async create(data: Omit<Comment, "id" | "createdAt">) {
+      const row: Comment = { ...data, id: nid("cmt"), likes: data.likes ?? 0, createdAt: nowIso() };
       store.comments.unshift(row);
       notify();
-      return row;
-    },
-    toggleLike(id: string) {
-      const c = store.comments.find((item) => item.id === id);
-      if (c) {
-        c.likes = (c.likes || 0) + 1;
+      try {
+        const saved = await api<Comment>("/api/comments", {
+          method: "POST",
+          body: JSON.stringify({
+            id: row.id,
+            seriesId: row.seriesId,
+            episodeId: row.episodeId,
+            text: row.text,
+            parentId: row.parentId,
+          }),
+        });
+        Object.assign(row, saved);
         notify();
-        return c.likes;
+        return row;
+      } catch (err) {
+        store.comments = store.comments.filter((c) => c.id !== row.id);
+        notify();
+        throw err;
       }
-      return 0;
+    },
+    async toggleLike(id: string) {
+      const c = store.comments.find((item) => item.id === id);
+      if (!c) return { likes: 0, liked: false };
+      const prevLikes = c.likes || 0;
+      const prevLiked = !!c.likedByMe;
+      const liked = !prevLiked;
+      c.likedByMe = liked;
+      c.likes = Math.max(0, prevLikes + (liked ? 1 : -1));
+      notify();
+      if (!getToken()) return { likes: c.likes, liked };
+      try {
+        const res = await api<{ liked: boolean; likes: number }>(`/api/comments/${id}/like`, { method: "POST" });
+        c.likes = res.likes ?? c.likes;
+        c.likedByMe = res.liked ?? liked;
+        notify();
+        return { likes: c.likes, liked: !!c.likedByMe };
+      } catch (err) {
+        c.likes = prevLikes;
+        c.likedByMe = prevLiked;
+        notify();
+        throw err;
+      }
     },
     toggleHide(id: string) {
       const c = store.comments.find((item) => item.id === id);
       if (c) {
         c.hidden = !c.hidden;
         notify();
+        fire(`/api/comments/${id}/hide`, { method: "POST" });
         return c.hidden;
       }
       return false;
@@ -1080,7 +928,23 @@ export const db = {
       if (idx < 0) return null;
       const [deleted] = store.comments.splice(idx, 1);
       notify();
+      fire(`/api/comments/${id}`, { method: "DELETE" });
       return deleted;
+    },
+  },
+
+  shares: {
+    track(data: { seriesId?: string; episodeId?: string; channel: string }) {
+      if (data.seriesId) {
+        const s = store.series.find((row) => row.id === data.seriesId);
+        if (s) s.shareCount = (s.shareCount || 0) + 1;
+      }
+      if (data.episodeId) {
+        const e = store.episodes.find((row) => row.id === data.episodeId);
+        if (e) e.shareCount = (e.shareCount || 0) + 1;
+      }
+      notify();
+      fire("/api/shares", { method: "POST", body: JSON.stringify(data) });
     },
   },
 
@@ -1103,14 +967,7 @@ export const db = {
       return store.communityUploads.find((c) => c.id === id) ?? null;
     },
     create(data: Omit<CommunityUpload, "id" | "createdAt" | "likes">) {
-      const row: CommunityUpload = {
-        ...data,
-        id: nid("cu"),
-        likes: 0,
-        views: 0,
-        status: data.status || "PENDING",
-        createdAt: nowIso(),
-      };
+      const row: CommunityUpload = { ...data, id: nid("cu"), likes: 0, views: 0, status: data.status || "PENDING", createdAt: nowIso() };
       store.communityUploads.unshift(row);
       notify();
       return row;
@@ -1121,6 +978,7 @@ export const db = {
         cu.status = status;
         if (notes) cu.moderationNotes = notes;
         notify();
+        fire(`/api/community/${id}`, { method: "PATCH", body: JSON.stringify({ status, moderationNotes: notes }) });
       }
       return cu ?? null;
     },
@@ -1129,18 +987,19 @@ export const db = {
       if (idx < 0) return null;
       const [deleted] = store.communityUploads.splice(idx, 1);
       notify();
+      fire(`/api/community/${id}`, { method: "DELETE" });
       return deleted;
     },
   },
 
   notifications: {
-    findMany(opts?: { userId?: string; userPhone?: string }) {
+    findMany() {
       return [...store.notifications].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
     },
     findForUser(userId?: string, userPhone?: string) {
       return store.notifications
         .filter((n) => {
-          if (n.targetUserId === "ALL") return true;
+          if (n.targetUserId === "ALL" || !n.targetUserId) return true;
           if (userId && n.targetUserId === userId) return true;
           if (userPhone && n.targetPhone === userPhone) return true;
           return false;
@@ -1151,14 +1010,10 @@ export const db = {
       return db.notifications.findForUser(userId, userPhone).filter((n) => !n.read).length;
     },
     create(data: Omit<AppNotification, "id" | "createdAt" | "read">) {
-      const row: AppNotification = {
-        ...data,
-        id: nid("notif"),
-        read: false,
-        createdAt: nowIso(),
-      };
+      const row: AppNotification = { ...data, id: nid("notif"), read: false, createdAt: nowIso() };
       store.notifications.unshift(row);
       notify();
+      fire("/api/notifications", { method: "POST", body: JSON.stringify(row) });
       return row;
     },
     blast(data: {
@@ -1171,30 +1026,20 @@ export const db = {
       targetPhone?: string;
       actionUrl?: string;
     }) {
-      const row: AppNotification = {
-        ...data,
-        id: nid("notif"),
-        targetUserId: data.targetUserId || "ALL",
-        read: false,
-        createdAt: nowIso(),
-      };
-      store.notifications.unshift(row);
-      notify();
-      return row;
+      return db.notifications.create({ ...data, targetUserId: data.targetUserId || "ALL" });
     },
     markAsRead(id: string) {
       const n = store.notifications.find((item) => item.id === id);
       if (n) {
         n.read = true;
         notify();
+        fire(`/api/notifications/${id}/read`, { method: "POST" });
       }
       return n ?? null;
     },
     markAllAsRead(userId?: string) {
       store.notifications.forEach((n) => {
-        if (n.targetUserId === "ALL" || (userId && n.targetUserId === userId)) {
-          n.read = true;
-        }
+        if (n.targetUserId === "ALL" || (userId && n.targetUserId === userId)) n.read = true;
       });
       notify();
     },
@@ -1203,6 +1048,7 @@ export const db = {
       if (idx < 0) return null;
       const [deleted] = store.notifications.splice(idx, 1);
       notify();
+      fire(`/api/notifications/${id}`, { method: "DELETE" });
       return deleted;
     },
   },
@@ -1228,24 +1074,113 @@ export const db = {
     },
     upsert(userId: string, episodeId: string, positionSec: number, completed: boolean) {
       const existing = store.progress.find((p) => p.userId === userId && p.episodeId === episodeId);
+      const persist = () => {
+        if (!getToken()) return;
+        fire("/api/progress", { method: "POST", body: JSON.stringify({ episodeId, positionSec, completed }) });
+      };
       if (existing) {
         existing.positionSec = positionSec;
         existing.completed = completed;
         existing.updatedAt = nowIso();
         notify();
+        persist();
         return existing;
       }
-      const row: Progress = {
-        id: nid("prog"),
-        userId,
-        episodeId,
-        positionSec,
-        completed,
-        updatedAt: nowIso(),
-      };
+      const row: Progress = { id: nid("prog"), userId, episodeId, positionSec, completed, updatedAt: nowIso() };
       store.progress.push(row);
       notify();
+      persist();
       return row;
+    },
+    resumeTarget(userId: string, seriesId: string): {
+      episodeId: string;
+      order: number;
+      positionSec: number;
+      durationSec: number;
+      title: string;
+      titleSw: string;
+    } | null {
+      const siblings = store.episodes
+        .filter((e) => e.seriesId === seriesId && e.published)
+        .sort((a, b) => a.order - b.order);
+      if (siblings.length === 0) return null;
+      const rows = store.progress
+        .filter((p) => p.userId === userId && siblings.some((e) => e.id === p.episodeId))
+        .sort((a, b) => +new Date(b.updatedAt) - +new Date(a.updatedAt));
+      if (rows.length === 0) {
+        const first = siblings[0];
+        return {
+          episodeId: first.id,
+          order: first.order,
+          positionSec: 0,
+          durationSec: first.durationSec,
+          title: first.title,
+          titleSw: first.titleSw,
+        };
+      }
+      const latest = rows[0];
+      const episode = siblings.find((e) => e.id === latest.episodeId);
+      if (!episode) return null;
+      const dur = episode.durationSec || 0;
+      const finished = latest.completed || (dur > 0 && latest.positionSec >= Math.max(dur - 3, 1));
+      if (finished) {
+        const next = siblings.find((e) => e.order > episode.order);
+        if (!next) return null;
+        const nextProg = rows.find((p) => p.episodeId === next.id);
+        return {
+          episodeId: next.id,
+          order: next.order,
+          positionSec: nextProg && !nextProg.completed ? nextProg.positionSec : 0,
+          durationSec: next.durationSec,
+          title: next.title,
+          titleSw: next.titleSw,
+        };
+      }
+      return {
+        episodeId: episode.id,
+        order: episode.order,
+        positionSec: latest.positionSec,
+        durationSec: episode.durationSec,
+        title: episode.title,
+        titleSw: episode.titleSw,
+      };
+    },
+    continueWatching(userId: string, take = 8): Array<SeriesCard & {
+      resumeEpisodeId: string;
+      resumeEpisodeOrder: number;
+      resumePositionSec: number;
+      resumeDurationSec: number;
+    }> {
+      const rows = [...store.progress]
+        .filter((p) => p.userId === userId)
+        .sort((a, b) => +new Date(b.updatedAt) - +new Date(a.updatedAt));
+      const items: Array<SeriesCard & {
+        resumeEpisodeId: string;
+        resumeEpisodeOrder: number;
+        resumePositionSec: number;
+        resumeDurationSec: number;
+      }> = [];
+      const seen = new Set<string>();
+      for (const p of rows) {
+        const episode = store.episodes.find((e) => e.id === p.episodeId);
+        if (!episode) continue;
+        const series = store.series.find((s) => s.id === episode.seriesId && s.published);
+        if (!series || seen.has(series.id)) continue;
+        const resume = db.progress.resumeTarget(userId, series.id);
+        if (!resume) continue;
+        const started = resume.positionSec >= 5 || p.completed || p.episodeId !== resume.episodeId;
+        if (!started) continue;
+        seen.add(series.id);
+        items.push({
+          ...toSeriesCard(series),
+          resumeEpisodeId: resume.episodeId,
+          resumeEpisodeOrder: resume.order,
+          resumePositionSec: resume.positionSec,
+          resumeDurationSec: resume.durationSec,
+        });
+        if (items.length >= take) break;
+      }
+      return items;
     },
   },
 
@@ -1266,10 +1201,12 @@ export const db = {
       if (existing) {
         store.favorites = store.favorites.filter((f) => f.id !== existing.id);
         notify();
+        if (getToken()) fire(`/api/favorites/${seriesId}/toggle`, { method: "POST" });
         return false;
       }
       store.favorites.push({ id: nid("fav"), userId, seriesId, createdAt: nowIso() });
       notify();
+      if (getToken()) fire(`/api/favorites/${seriesId}/toggle`, { method: "POST" });
       return true;
     },
   },
@@ -1296,11 +1233,11 @@ export const db = {
       const ts = nowIso();
       const row: VideoJob = {
         id: data.id ?? nid("job"),
-        seriesId: data.seriesId ?? "series-prophets",
+        seriesId: data.seriesId ?? "",
         episodeId: data.episodeId ?? null,
         episodeTitle: data.episodeTitle ?? "Untitled Episode",
         format: data.format ?? "VERTICAL_9_16",
-        engine: data.engine ?? "remotion",
+        engine: data.engine ?? "qisas-ai",
         progress: data.progress ?? 0,
         currentStep: data.currentStep ?? "Queued",
         status: data.status ?? "QUEUED",
@@ -1322,15 +1259,10 @@ export const db = {
       };
       store.videoJobs.push(row);
       notify();
+      fire("/api/video-jobs", { method: "POST", body: JSON.stringify(row) });
       return row;
     },
-    updateProgress(
-      id: string,
-      progress: number,
-      status?: VideoJob["status"],
-      currentStep?: string,
-      outputUrl?: string
-    ) {
+    updateProgress(id: string, progress: number, status?: VideoJob["status"], currentStep?: string, outputUrl?: string) {
       const row = store.videoJobs.find((j) => j.id === id);
       if (!row) return null;
       if (status) row.status = status;
@@ -1339,6 +1271,10 @@ export const db = {
       if (outputUrl) row.outputUrl = outputUrl;
       row.updatedAt = nowIso();
       notify();
+      fire(`/api/video-jobs/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ progress, status, currentStep, outputUrl }),
+      });
       return row;
     },
     update(id: string, data: Partial<VideoJob>) {
@@ -1346,6 +1282,7 @@ export const db = {
       if (!row) return null;
       Object.assign(row, data, { updatedAt: nowIso() });
       notify();
+      fire(`/api/video-jobs/${id}`, { method: "PATCH", body: JSON.stringify(data) });
       return row;
     },
     delete(id: string) {
@@ -1353,7 +1290,22 @@ export const db = {
       if (idx < 0) return null;
       const [row] = store.videoJobs.splice(idx, 1);
       notify();
+      fire(`/api/video-jobs/${id}`, { method: "DELETE" });
       return row;
     },
   },
+
+  ai: {
+    generateStory(payload: { prompt: string; categorySlug: string; targetDurationSec: number; tone: string }) {
+      return api("/api/ai/generate-story", { method: "POST", body: JSON.stringify(payload) });
+    },
+    generateStoryboard(payload: { brief: string; targetDurationSec: number }) {
+      return api("/api/ai/generate-storyboard", { method: "POST", body: JSON.stringify(payload) });
+    },
+    publishStory(story: any, mediaUrl?: string) {
+      return api("/api/ai/publish-story", { method: "POST", body: JSON.stringify({ story, mediaUrl, isFree: true }) });
+    },
+  },
 };
+
+export type MeSession = SessionUser;

@@ -12,7 +12,7 @@ import {
   RefreshCw,
   Film,
 } from "lucide-react";
-import { db, subscribeDb } from "../../lib/mock/db";
+import { db, hydrate, subscribeDb } from "../../lib/mock/db";
 import type { Category, SeriesCoverGradient } from "../../lib/mock/types";
 
 interface GeneratedBeat {
@@ -84,116 +84,35 @@ export default function AiContentGeneratorPage() {
     setTargetDuration(p.duration);
   }
 
-  function handleGenerate(e?: React.FormEvent) {
+  async function handleGenerate(e?: React.FormEvent) {
     if (e) e.preventDefault();
     if (!prompt.trim()) return;
-
     setIsGenerating(true);
     setSavedSuccess(false);
-
-    // High quality contextual Islamic narrative generator
-    setTimeout(() => {
-      const isProphet = selectedCatSlug === "manabii";
-      const isCompanion = selectedCatSlug === "maswahaba";
-      const isKid = selectedCatSlug === "watoto";
-
-      const titleSw = isProphet
-        ? "Kisa cha " + prompt.split(" ")[2] || "Kisa cha Nabii na Rehema ya Mola"
-        : isCompanion
-        ? "Uaminifu wa Maswahaba: " + prompt.slice(0, 30)
-        : isKid
-        ? "Hadithi Tamu ya Watoto: Tabia Njema"
-        : "Hazina ya Hikma: Darsa Maalumu";
-
-      const titleEn = isProphet
-        ? "The Life and Virtues of the Prophet"
-        : isCompanion
-        ? "Companions of Truth and Valor"
-        : isKid
-        ? "Virtues and Manners for Young Hearts"
-        : "Gems of Wisdom and Islamic History";
-
-      const story: GeneratedStory = {
-        titleSw,
-        titleEn,
-        descriptionSw: `Msururu mfupi na wenye kugusa moyo unaosimulia ${prompt}. Imeandaliwa kwa ufasaha wa Kiswahili na kanuni za daraja la juu.`,
-        descriptionEn: `A structured micro-narrative detailing the moral lessons and profound resilience of early Islamic exemplars.`,
+    try {
+      const story = await db.ai.generateStory({
+        prompt,
         categorySlug: selectedCatSlug,
-        coverGradient: isProphet ? "gold" : isCompanion ? "forest" : isKid ? "emerald" : "teal",
         targetDurationSec: targetDuration,
-        moralSw: "Uvumilivu katika subira na kumtegemea Mwenyezi Mungu huleta ushindi na furaha ya dhati.",
-        beats: [
-          {
-            timestamp: "00:00 - 00:25",
-            narrativeSw: "Bismillahir Rahmanir Rahim. Katika zama za mwangaza wa imani, kulikuwa na mfano mzuri wa mtu aliyeshikamana na haki bila hofu...",
-            visualPrompt: "Golden morning light over an ancient oasis with stylized Arabic calligraphy rising gently.",
-          },
-          {
-            timestamp: "00:26 - 00:55",
-            narrativeSw: "Majaribu yalipozidi kuwa makali, ulimi wake haukuacha kutaja jina la Mola wake. Hata pale ambapo dunia ilionekana kuwa finyu, imani yake ilikuwa pana kuliko mbingu na ardhi...",
-            visualPrompt: "Warm wind sweeping golden desert sands under deep starry twilight.",
-          },
-          {
-            timestamp: "00:56 - 01:25",
-            narrativeSw: "Na Mwenyezi Mungu huwalipa wanaosubiri. Kila machozi ya subira yalibadilika kuwa mti wenye matunda ya heri kwa jamii nzima iliyomzunguka...",
-            visualPrompt: "Minaret silhouette against a tranquil sunset with emerald and gold aura.",
-          },
-          {
-            timestamp: "01:26 - 02:00",
-            narrativeSw: "Tujifunze kutokana na kisa hiki: kuwa na moyo thabiti, kuwajali walio dhaifu, na kutambua kwamba baada ya kila dhiki kuna faraja.",
-            visualPrompt: "Soft lantern glow reflecting off water in an authentic Islamic courtyard.",
-          },
-        ],
-      };
-
+        tone,
+      });
       setResult(story);
+    } catch (err: any) {
+      alert(err?.message || "AI generation failed");
+    } finally {
       setIsGenerating(false);
-    }, 1200);
+    }
   }
 
-  function handleSaveToDatabase() {
+  async function handleSaveToDatabase() {
     if (!result) return;
-
-    // Find or create category
-    const cat = db.categories.findBySlug(result.categorySlug) || db.categories.findMany()[0];
-
-    const slug = result.titleSw
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "");
-
-    // Create Series
-    const newSeries = db.series.create({
-      title: result.titleEn,
-      titleSw: result.titleSw,
-      description: result.descriptionEn,
-      descriptionSw: result.descriptionSw,
-      slug: `${slug}-${Date.now().toString().slice(-4)}`,
-      categoryId: cat.id,
-      coverGradient: result.coverGradient,
-      image: null,
-      featured: true,
-      published: true,
-    });
-
-    // Create Episode 1 with narrative
-    const audioUrl = db.episodes.findMany()[0]?.mediaUrl || "/media/seed/bilal-ibn-rabah-ep01.wav";
-
-    db.episodes.create({
-      seriesId: newSeries.id,
-      seasonNumber: 1,
-      order: 1,
-      title: `${result.titleEn} - Part 1`,
-      titleSw: `${result.titleSw} - Sehemu ya 1`,
-      durationSec: result.targetDurationSec,
-      mediaUrl: audioUrl,
-      mediaType: "AUDIO",
-      isFree: true,
-      published: true,
-      authorName: "Qisas Studio",
-    });
-
-    setSavedSuccess(true);
+    try {
+      await db.ai.publishStory(result);
+      await hydrate();
+      setSavedSuccess(true);
+    } catch (err: any) {
+      alert(err?.message || "Could not publish story");
+    }
   }
 
   function handleCopyScript() {

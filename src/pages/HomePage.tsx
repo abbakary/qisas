@@ -1,12 +1,14 @@
 ﻿import React, { useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { useLang, pick } from "../context/LanguageContext";
 import { useAuth } from "../context/AuthContext";
 import { db, toSeriesCard, subscribeDb } from "../lib/mock/db";
 import SeriesCard, { type SeriesCardData } from "../components/SeriesCard";
 import HomeHeroSlideshow, { type SlideItem } from "../components/HomeHeroSlideshow";
-import { gradientFor } from "../lib/gradients";
-import { Search, ChevronDown, Check, X, Play } from "lucide-react";
+import { Search, ChevronDown, Check, X, Flame, Sparkles } from "lucide-react";
+import { activeGivingCampaign } from "../lib/giving-seasons";
+import { Link } from "react-router-dom";
+import { seriesMatchesQuery } from "../lib/search";
 
 const SLIDE_THEMES = [
   {
@@ -35,18 +37,6 @@ const SLIDE_THEMES = [
   },
 ];
 
-type CW = {
-  episodeId: string;
-  order: number;
-  positionSec: number;
-  durationSec: number;
-  seriesSlug: string;
-  seriesTitle: string;
-  seriesTitleSw: string;
-  coverGradient: string;
-  image: string | null;
-};
-
 export default function HomePage() {
   const { lang, toggle, t } = useLang();
   const { user } = useAuth();
@@ -54,7 +44,7 @@ export default function HomePage() {
   const [activeFilter, setActiveFilter] = useState<"popular" | "new" | "category">("popular");
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
-  const [, setDbVersion] = useState(0);
+  const [dbVersion, setDbVersion] = useState(0);
 
   const queryParam = searchParams.get("q") || "";
   const [searchQuery, setSearchQuery] = useState(queryParam);
@@ -69,24 +59,22 @@ export default function HomePage() {
 
   const allCategories = useMemo(() => {
     return db.categories.findMany();
-  }, []);
+  }, [dbVersion]);
 
   const allPublished = useMemo(() => {
     return db.series.findMany({ published: true });
-  }, []);
+  }, [dbVersion]);
 
   // Filtered series
   const filteredSeries: SeriesCardData[] = useMemo(() => {
     let list = [...allPublished];
 
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      list = list.filter(
-        (s) =>
-          s.title.toLowerCase().includes(q) ||
-          s.titleSw.toLowerCase().includes(q) ||
-          s.description.toLowerCase().includes(q) ||
-          s.descriptionSw.toLowerCase().includes(q)
+      list = list.filter((s) =>
+        seriesMatchesQuery(s, searchQuery, {
+          category: db.categories.findById(s.categoryId),
+          episodes: db.episodes.findBySeries(s.id),
+        }),
       );
     } else {
       if (selectedCategoryId) {
@@ -119,35 +107,24 @@ export default function HomePage() {
   }, [allPublished, lang]);
 
   // Continue watching
-  const continueWatching: CW[] = useMemo(() => {
+  const continueWatching: SeriesCardData[] = useMemo(() => {
     if (!user?.id) return [];
-    const progressRows = db.progress.findMany(user.id, { completed: false }).slice(0, 4);
-    return progressRows.flatMap((p) => {
-      const episode = db.episodes.findById(p.episodeId);
-      if (!episode) return [];
-      const ser = db.series.findById(episode.seriesId);
-      if (!ser) return [];
-      const category = db.categories.findById(ser.categoryId);
-      return [
-        {
-          episodeId: episode.id,
-          order: episode.order,
-          positionSec: p.positionSec,
-          durationSec: episode.durationSec,
-          seriesSlug: ser.slug,
-          seriesTitle: ser.title,
-          seriesTitleSw: ser.titleSw,
-          coverGradient: ser.coverGradient,
-          image: ser.image ?? category?.image ?? null,
-        },
-      ];
-    });
-  }, [user?.id]);
+    return db.progress.continueWatching(user.id, 10);
+  }, [user?.id, dbVersion]);
 
   function handleSearchChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const val = e.target.value;
+    setSearchQuery(e.target.value);
+  }
+
+  function applySearch(raw: string) {
+    const val = raw.trim();
     setSearchQuery(val);
     setSearchParams(val ? { q: val } : {});
+  }
+
+  function handleSearchSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    applySearch(searchQuery);
   }
 
   function clearSearch() {
@@ -171,8 +148,19 @@ export default function HomePage() {
                 ASSALAMU ALAYKUM
               </div>
               <h1 className="font-display text-[18px] sm:text-[22px] md:text-3xl font-bold text-white mt-0.5 leading-tight">
-                {user?.name || "Karibu"}
+                {user?.name || (lang === "sw" ? "Karibu — soma bila ukuta" : "Welcome — browse freely")}
               </h1>
+              {user && (user.streakDays || 0) > 0 && (
+                <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-gold/20 px-2 py-0.5 text-[10px] font-bold text-gold-light">
+                  <Flame size={11} />
+                  {user.streakDays} {lang === "sw" ? "siku mfululizo" : "day streak"}
+                  {(user.badges || []).includes("streak-7")
+                    ? ` · ${lang === "sw" ? "nyota ya wiki" : "week star"}`
+                    : (user.badges || []).includes("streak-3")
+                    ? ` · ${lang === "sw" ? "beji" : "badge"}`
+                    : ""}
+                </div>
+              )}
             </div>
             <button
               onClick={toggle}
@@ -183,24 +171,40 @@ export default function HomePage() {
           </div>
 
           {/* Search bar — full width on mobile */}
-          <div className="relative w-full">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/50" size={14} />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={handleSearchChange}
-              placeholder={lang === "sw" ? "Tafuta hadithi..." : "Search stories..."}
-              className="w-full rounded-xl bg-white/10 pl-9 pr-8 py-2.5 text-[13px] text-warm-white placeholder:text-white/50 outline-none border border-white/15 focus:border-gold-light focus:bg-white/15 transition"
-            />
-            {searchQuery && (
-              <button
-                onClick={clearSearch}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-white/60 hover:text-white p-0.5 cursor-pointer"
-              >
-                <X size={14} />
-              </button>
-            )}
-          </div>
+          <form
+            onSubmit={handleSearchSubmit}
+            className="flex w-full items-stretch"
+            role="search"
+          >
+            <div className="relative min-w-0 flex-1">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/50 pointer-events-none" size={14} />
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={handleSearchChange}
+                placeholder={lang === "sw" ? "Tafuta hadithi..." : "Search stories..."}
+                enterKeyHint="search"
+                className="w-full rounded-l-xl rounded-r-none bg-white/10 pl-9 pr-8 py-2.5 text-[13px] text-warm-white placeholder:text-white/50 outline-none border border-white/15 border-r-0 focus:border-gold-light focus:bg-white/15 transition"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={clearSearch}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/60 hover:text-white p-0.5 cursor-pointer"
+                  aria-label={lang === "sw" ? "Futa" : "Clear"}
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+            <button
+              type="submit"
+              className="flex flex-shrink-0 items-center gap-1.5 rounded-r-xl bg-gold hover:bg-gold-light px-3.5 sm:px-4 text-deep-green text-[12px] font-black border border-gold transition active:scale-[0.98] cursor-pointer"
+            >
+              <Search size={14} />
+              <span className="hidden sm:inline">{lang === "sw" ? "Tafuta" : "Search"}</span>
+            </button>
+          </form>
         </div>
       </header>
 
@@ -209,39 +213,62 @@ export default function HomePage() {
         <HomeHeroSlideshow items={slideshowItems} />
       )}
 
+      {!searchQuery && (() => {
+        const sow = db.monetize.storyOfWeek();
+        const campaign = activeGivingCampaign();
+        if (!sow && !campaign) return null;
+        const sowCard = sow ? toSeriesCard(sow) : null;
+        return (
+          <div className="max-w-7xl mx-auto w-full px-4 sm:px-5 md:px-10 lg:px-16 pt-4 space-y-3">
+            {sow && sowCard && (
+              <Link
+                to={`/series/${sow.slug}`}
+                className="block rounded-2xl border border-gold/40 bg-gradient-to-r from-deep-green to-[#133C30] p-4 text-warm-white shadow-sm"
+              >
+                <div className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-widest text-gold">
+                  <Sparkles size={12} />
+                  {lang === "sw" ? "Hadithi ya wiki — bure kamili" : "Story of the week — fully free"}
+                </div>
+                <div className="mt-1 font-display text-lg font-bold">
+                  {pick(lang, sow.titleSw, sow.title)}
+                </div>
+                <p className="mt-1 text-[11px] text-gold-light/90">
+                  {lang === "sw"
+                    ? "Kutoka kwenye katalogi iliyolipiwa, inazunguka kila wiki. Hakuna kuisha kwa jaribio."
+                    : "From the paid catalog, rotating this week. No trial clock."}
+                  {sow.sponsoredPlays
+                    ? ` · ${sow.sponsoredPlays} ${lang === "sw" ? "walifika kwa wadhamini" : "reached via sponsors"}`
+                    : ""}
+                </p>
+              </Link>
+            )}
+            {campaign && (
+              <Link
+                to="/subscribe"
+                className="block rounded-2xl border border-gold/30 bg-gold/10 px-4 py-3 text-xs text-deep-green"
+              >
+                <span className="font-bold">{lang === "sw" ? campaign.titleSw : campaign.titleEn}</span>
+                <span className="text-muted"> — {lang === "sw" ? campaign.blurbSw : campaign.blurbEn}</span>
+              </Link>
+            )}
+          </div>
+        );
+      })()}
+
       {/* 3. Continue Watching (if active) */}
       {!searchQuery && continueWatching.length > 0 && (
         <div className="max-w-7xl mx-auto w-full px-4 sm:px-5 md:px-10 lg:px-16 pt-3 md:pt-5 pb-1">
-          <div className="text-[9.5px] sm:text-[10.5px] md:text-xs font-bold uppercase tracking-[0.05em] text-muted mb-2">
-            {t("continueWatching")}
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-[9.5px] sm:text-[10.5px] md:text-xs font-bold uppercase tracking-[0.05em] text-muted">
+              {t("continueWatching")}
+            </div>
+            <span className="text-[10px] font-bold text-muted bg-sand px-2 py-0.5 rounded-full">
+              {continueWatching.length}
+            </span>
           </div>
-          <div className="flex gap-2 sm:gap-2.5 md:gap-3.5 overflow-x-auto no-scrollbar pb-1">
-            {continueWatching.map((c) => (
-              <Link
-                key={c.episodeId}
-                to={`/player/${c.episodeId}`}
-                className="flex-shrink-0 w-[120px] sm:w-[140px] md:w-[180px] rounded-xl bg-white border border-line p-2 shadow-sm hover:shadow transition"
-              >
-                <div
-                  className="relative h-[56px] sm:h-[68px] md:h-[84px] w-full rounded-lg overflow-hidden flex items-center justify-center"
-                  style={c.image ? undefined : { background: gradientFor(c.coverGradient) }}
-                >
-                  {c.image && (
-                    <img src={c.image} alt="" className="h-full w-full object-cover" />
-                  )}
-                  <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
-                    <div className="h-6 w-6 rounded-full bg-gold flex items-center justify-center text-deep-green shadow">
-                      <Play size={11} fill="currentColor" />
-                    </div>
-                  </div>
-                </div>
-                <div className="mt-1.5 font-display text-[11px] sm:text-[12px] md:text-[13px] font-bold text-ink line-clamp-1">
-                  {pick(lang, c.seriesTitleSw, c.seriesTitle)}
-                </div>
-                <div className="text-[9px] sm:text-[10px] md:text-[11px] text-muted">
-                  {t("episode")} {c.order}
-                </div>
-              </Link>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2.5 sm:gap-4 md:gap-5">
+            {continueWatching.map((s) => (
+              <SeriesCard key={`cw-${s.slug}`} s={s} />
             ))}
           </div>
         </div>

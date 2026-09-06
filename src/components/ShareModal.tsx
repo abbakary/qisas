@@ -8,12 +8,14 @@ export default function ShareModal({
   title,
   url,
   onCopySuccess,
+  onShare,
 }: {
   isOpen: boolean;
   onClose: () => void;
   title: string;
   url: string;
   onCopySuccess?: () => void;
+  onShare?: (channel: string) => void;
 }) {
   const { lang } = useLang();
   const [copied, setCopied] = useState(false);
@@ -26,6 +28,7 @@ export default function ShareModal({
   function copyToClipboard() {
     navigator.clipboard.writeText(url);
     setCopied(true);
+    onShare?.("copy");
     if (onCopySuccess) onCopySuccess();
     setTimeout(() => setCopied(false), 2000);
   }
@@ -91,6 +94,7 @@ export default function ShareModal({
                 href={item.href}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={() => onShare?.(item.name.toLowerCase())}
                 className="flex flex-col items-center gap-1.5 p-2 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 transition group"
               >
                 <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${item.color} transition shadow`}>

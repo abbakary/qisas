@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import React, { useEffect, useState } from "react";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useLang } from "../context/LanguageContext";
 import { useAuth } from "../context/AuthContext";
 import KhatamStar from "./KhatamStar";
@@ -7,6 +7,7 @@ import {
   Home,
   Grid2x2,
   Bookmark,
+  Coins,
   User as UserIcon,
   Shield,
   Search,
@@ -23,6 +24,12 @@ export default function TopNav() {
   const { user } = useAuth();
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchParams] = useSearchParams();
+
+  useEffect(() => {
+    const q = searchParams.get("q") || "";
+    if (pathname === "/home" && q) setSearchQuery(q);
+  }, [pathname, searchParams]);
 
   const navItems = [
     {
@@ -38,6 +45,13 @@ export default function TopNav() {
       labelEn: "Categories",
       icon: Grid2x2,
       match: (p: string) => p.startsWith("/categories") || p.startsWith("/category"),
+    },
+    {
+      href: "/subscribe",
+      labelSw: "Fungua",
+      labelEn: "Unlock",
+      icon: Coins,
+      match: (p: string) => p.startsWith("/subscribe"),
     },
     {
       href: "/saved",
@@ -57,10 +71,12 @@ export default function TopNav() {
 
   function handleSearchSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!searchQuery.trim()) return;
-    navigate(`/home?q=${encodeURIComponent(searchQuery.trim())}`);
-    setSearchOpen(false);
-    setSearchQuery("");
+    const q = searchQuery.trim();
+    if (!q) {
+      navigate("/home");
+      return;
+    }
+    navigate(`/home?q=${encodeURIComponent(q)}`);
   }
 
   return (
@@ -178,33 +194,45 @@ export default function TopNav() {
         <div className="border-t border-white/10 bg-deep-green/95 backdrop-blur-sm px-6 lg:px-10 py-2.5">
           <form
             onSubmit={handleSearchSubmit}
-            className="max-w-xl mx-auto relative flex items-center"
+            className="max-w-2xl mx-auto flex items-stretch"
+            role="search"
           >
-            <Search
-              size={14}
-              className="absolute left-3.5 text-white/50 pointer-events-none"
-            />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={
-                lang === "sw"
-                  ? "Tafuta hadithi za mitume, maswahaba..."
-                  : "Search prophets, companions, stories..."
-              }
-              autoFocus
-              className="w-full bg-white/10 text-warm-white placeholder:text-white/40 text-[13px] rounded-xl pl-9 pr-8 py-2 border border-white/15 focus:border-gold-light focus:bg-white/15 outline-none transition"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery("")}
-                className="absolute right-3 text-white/50 hover:text-white transition"
-              >
-                <X size={13} />
-              </button>
-            )}
+            <div className="relative min-w-0 flex-1">
+              <Search
+                size={14}
+                className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/50 pointer-events-none"
+              />
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={
+                  lang === "sw"
+                    ? "Tafuta hadithi za mitume, maswahaba..."
+                    : "Search prophets, companions, stories..."
+                }
+                autoFocus
+                enterKeyHint="search"
+                className="w-full bg-white/10 text-warm-white placeholder:text-white/40 text-[13px] rounded-l-xl rounded-r-none pl-9 pr-9 py-2 border border-white/15 border-r-0 focus:border-gold-light focus:bg-white/15 outline-none transition"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/50 hover:text-white transition"
+                  aria-label={lang === "sw" ? "Futa" : "Clear"}
+                >
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+            <button
+              type="submit"
+              className="flex items-center gap-1.5 rounded-r-xl bg-gold hover:bg-gold-light px-4 text-deep-green text-[12px] font-black border border-gold transition active:scale-[0.98]"
+            >
+              <Search size={14} />
+              <span>{lang === "sw" ? "Tafuta" : "Search"}</span>
+            </button>
           </form>
         </div>
       )}

@@ -9,6 +9,7 @@ import {
   Wand2,
   Users,
   CreditCard,
+  Coins,
   MessageSquare,
   UploadCloud,
   Bell,
@@ -22,7 +23,7 @@ import {
   Search,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
-import { db, subscribeDb, resetStoreToSeed } from "../lib/mock/db";
+import { db, subscribeDb, resetStoreToSeed, hydrate } from "../lib/mock/db";
 import ConfirmModal from "./admin/ConfirmModal";
 
 type NavItem = {
@@ -47,6 +48,21 @@ export default function AdminLayout() {
   const [quickActionOpen, setQuickActionOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [, setDbVersion] = useState(0);
+
+  useEffect(() => {
+    if (user?.role !== "ADMIN") return;
+    void hydrate().then(() => db.monetize.refreshAdmin().catch(() => undefined));
+    const onFocus = () => {
+      if (document.visibilityState && document.visibilityState !== "visible") return;
+      void db.monetize.refreshAdmin().catch(() => undefined);
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, [user?.role]);
 
   useEffect(() => {
     return subscribeDb(() => setDbVersion((v) => v + 1));
@@ -149,6 +165,11 @@ export default function AdminLayout() {
           path: "/admin/subscriptions",
           icon: <CreditCard className="h-4 w-4" />,
         },
+        {
+          label: "Unlocks & Sadaqah",
+          path: "/admin/monetize",
+          icon: <Coins className="h-4 w-4" />,
+        },
       ],
     },
     {
@@ -176,7 +197,7 @@ export default function AdminLayout() {
   }
 
   function handleResetDb() {
-    resetStoreToSeed();
+    void resetStoreToSeed();
     setResetModalOpen(false);
   }
 

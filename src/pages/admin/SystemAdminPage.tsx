@@ -76,7 +76,7 @@ export default function SystemAdminPage() {
   }
 
   function handleConfirmReset() {
-    resetStoreToSeed();
+    void resetStoreToSeed();
     setResetModalOpen(false);
   }
 

@@ -69,12 +69,14 @@ export default function ContentRulesAuditPage() {
         type: "SERIES",
         title: s.titleSw,
         rule: "Rule 7.2: Free Tier Preview Missing",
-        description: "Series has no free episodes. At least Ep 1 should be free for viewer acquisition.",
+        description: "Series has no free episodes. The first three episodes should stay free.",
         severity: "error",
-        actionLabel: "Unlock Ep 1",
+        actionLabel: "Free first 3",
         onFix: () => {
-          const first = eps.sort((a, b) => a.order - b.order)[0];
-          if (first) db.episodes.update(first.id, { isFree: true });
+          eps
+            .sort((a, b) => a.order - b.order)
+            .slice(0, 3)
+            .forEach((ep) => db.episodes.update(ep.id, { isFree: true }));
         },
       });
     }

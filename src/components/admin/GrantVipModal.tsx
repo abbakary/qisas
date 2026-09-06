@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import type { SubscriptionPlan, User } from "../../lib/mock/types";
-import { db } from "../../lib/mock/db";
+import { hydrate } from "../../lib/mock/db";
+import { api } from "../../lib/api/client";
 
 interface GrantVipModalProps {
   user: User | null;
@@ -28,16 +29,16 @@ export default function GrantVipModal({ user, isOpen, onClose, onSuccess }: Gran
     setBusy(true);
     setMsg(null);
     try {
-      const res = db.subscriptions.grantVIP(user.id, selectedPlan);
-      if (res) {
-        setMsg({ ok: true, text: `Successfully granted ${selectedPlan} VIP to ${user.name}!` });
-        setTimeout(() => {
-          onSuccess?.();
-          onClose();
-        }, 1000);
-      } else {
-        setMsg({ ok: false, text: "Failed to grant VIP." });
-      }
+      await api("/api/subscriptions/grant", {
+        method: "POST",
+        body: JSON.stringify({ userId: user.id, plan: selectedPlan }),
+      });
+      await hydrate();
+      setMsg({ ok: true, text: `Successfully granted ${selectedPlan} VIP to ${user.name}!` });
+      setTimeout(() => {
+        onSuccess?.();
+        onClose();
+      }, 800);
     } catch {
       setMsg({ ok: false, text: "Error granting VIP." });
     } finally {

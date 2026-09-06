@@ -40,6 +40,8 @@ export default function SeriesAdminPage() {
   const [formImage, setFormImage] = useState("");
   const [formFeatured, setFormFeatured] = useState(false);
   const [formPublished, setFormPublished] = useState(true);
+  const [formPrice, setFormPrice] = useState(1000);
+  const [formStoryOfWeek, setFormStoryOfWeek] = useState(false);
 
   useEffect(() => {
     setSeriesList(db.series.findMany());
@@ -73,6 +75,8 @@ export default function SeriesAdminPage() {
     setFormImage(s.image || "");
     setFormFeatured(s.featured);
     setFormPublished(s.published);
+    setFormPrice(s.unlockPriceTzs || 1000);
+    setFormStoryOfWeek(!!s.isStoryOfWeek);
   }
 
   function handleSaveEdit(e: React.FormEvent) {
@@ -89,6 +93,8 @@ export default function SeriesAdminPage() {
       image: formImage.trim() || null,
       featured: formFeatured,
       published: formPublished,
+      unlockPriceTzs: formPrice,
+      isStoryOfWeek: formStoryOfWeek,
     });
 
     setEditingSeries(null);
@@ -187,6 +193,30 @@ export default function SeriesAdminPage() {
           </Link>
         );
       },
+    },
+    {
+      id: "price",
+      header: "Unlock TZS",
+      align: "right",
+      sortable: true,
+      accessor: (s) => s.unlockPriceTzs || 0,
+      cell: (s) => (
+        <span className="font-mono text-xs font-bold text-deep-green">
+          {(s.unlockPriceTzs || 0).toLocaleString()}
+        </span>
+      ),
+    },
+    {
+      id: "sow",
+      header: "Week",
+      align: "center",
+      width: "70px",
+      cell: (s) =>
+        s.isStoryOfWeek ? (
+          <span className="rounded-full bg-gold/20 text-gold-dark px-2 py-0.5 text-[10px] font-extrabold">WEEK</span>
+        ) : (
+          <span className="text-muted">—</span>
+        ),
     },
     {
       id: "views",
@@ -495,6 +525,33 @@ export default function SeriesAdminPage() {
                   onChange={(e) => setFormImage(e.target.value)}
                   className="mt-1 w-full rounded-xl border border-line bg-sand/20 px-3 py-2 text-xs text-ink focus:bg-white focus:border-gold focus:outline-none transition"
                 />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-muted">
+                  Unlock price (TZS, once, forever)
+                </label>
+                <select
+                  value={formPrice}
+                  onChange={(e) => setFormPrice(Number(e.target.value))}
+                  className="mt-1 w-full rounded-xl border border-line bg-sand/20 px-3 py-2 text-xs font-semibold text-ink"
+                >
+                  <option value={500}>500 — short series</option>
+                  <option value={1000}>1,000 — standard</option>
+                  <option value={1500}>1,500 — long / high production</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-6 pt-2">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-ink">
+                  <input
+                    type="checkbox"
+                    checked={formStoryOfWeek}
+                    onChange={(e) => setFormStoryOfWeek(e.target.checked)}
+                    className="rounded border-line text-deep-green focus:ring-gold"
+                  />
+                  <span>Story of the week (full catalog free this week)</span>
+                </label>
               </div>
 
               <div className="flex items-center gap-6 pt-2">
