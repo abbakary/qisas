@@ -1,13 +1,12 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+﻿import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { useLang, pick } from "../context/LanguageContext";
 import { useAuth } from "../context/AuthContext";
 import { db, toSeriesCard, subscribeDb } from "../lib/mock/db";
 import SeriesCard, { type SeriesCardData } from "../components/SeriesCard";
 import HomeHeroSlideshow, { type SlideItem } from "../components/HomeHeroSlideshow";
-import { Search, ChevronDown, Check, X, Flame, Sparkles } from "lucide-react";
+import { Search, ChevronDown, X, Flame, Sparkles, Grid2x2 } from "lucide-react";
 import { activeGivingCampaign } from "../lib/giving-seasons";
-import { Link } from "react-router-dom";
 import { seriesMatchesQuery } from "../lib/search";
 
 const SLIDE_THEMES = [
@@ -45,6 +44,7 @@ export default function HomePage() {
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
   const [dbVersion, setDbVersion] = useState(0);
+  const categoryPickerRef = useRef<HTMLDivElement>(null);
 
   const queryParam = searchParams.get("q") || "";
   const [searchQuery, setSearchQuery] = useState(queryParam);
@@ -56,6 +56,24 @@ export default function HomePage() {
   useEffect(() => {
     return subscribeDb(() => setDbVersion((v) => v + 1));
   }, []);
+
+  useEffect(() => {
+    if (!categoryDropdownOpen) return;
+    function onPointerDown(event: PointerEvent) {
+      if (!categoryPickerRef.current?.contains(event.target as Node)) {
+        setCategoryDropdownOpen(false);
+      }
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setCategoryDropdownOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [categoryDropdownOpen]);
 
   const allCategories = useMemo(() => {
     return db.categories.findMany();
@@ -276,13 +294,17 @@ export default function HomePage() {
 
       {/* 4. Filter Pills Row */}
       {!searchQuery && (
-        <div className="relative max-w-7xl mx-auto w-full px-4 sm:px-5 md:px-10 lg:px-16 pt-3 md:pt-4 pb-1">
+        <div
+          ref={categoryPickerRef}
+          className="relative z-20 max-w-7xl mx-auto w-full px-4 sm:px-5 md:px-10 lg:px-16 pt-3 md:pt-4 pb-1"
+        >
           <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar">
-            {/* Maarufu */}
             <button
+              type="button"
               onClick={() => {
                 setActiveFilter("popular");
                 setSelectedCategoryId(null);
+                setCategoryDropdownOpen(false);
               }}
               className={`flex-shrink-0 rounded-full px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold transition cursor-pointer ${
                 activeFilter === "popular" && !selectedCategoryId
@@ -293,11 +315,12 @@ export default function HomePage() {
               {lang === "sw" ? "Maarufu" : "Popular"}
             </button>
 
-            {/* Mpya */}
             <button
+              type="button"
               onClick={() => {
                 setActiveFilter("new");
                 setSelectedCategoryId(null);
+                setCategoryDropdownOpen(false);
               }}
               className={`flex-shrink-0 rounded-full px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold transition cursor-pointer ${
                 activeFilter === "new" && !selectedCategoryId
@@ -308,63 +331,87 @@ export default function HomePage() {
               {lang === "sw" ? "Mpya" : "New"}
             </button>
 
-            {/* Aina ▾ Dropdown */}
-            <div className="relative flex-shrink-0">
-              <button
-                onClick={() => setCategoryDropdownOpen(!categoryDropdownOpen)}
-                className={`flex items-center gap-1 rounded-full px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold transition cursor-pointer ${
-                  selectedCategoryId
-                    ? "bg-gold text-deep-green shadow-sm"
-                    : "bg-sand text-ink hover:bg-[#e6dcb9]"
-                }`}
-              >
-                <span>
-                  {selectedCategory
-                    ? pick(lang, selectedCategory.nameSw, selectedCategory.name)
-                    : (lang === "sw" ? "Aina" : "Category")}
-                </span>
-                <ChevronDown size={12} />
-              </button>
-
-              {/* Dropdown Menu */}
-              {categoryDropdownOpen && (
-                <div className="absolute left-0 top-full mt-1.5 z-30 min-w-[160px] rounded-2xl bg-white border border-line p-1.5 shadow-xl animate-in fade-in">
-                  <button
-                    onClick={() => {
-                      setSelectedCategoryId(null);
-                      setCategoryDropdownOpen(false);
-                    }}
-                    className={`flex w-full items-center justify-between px-3 py-2 text-left text-xs font-semibold rounded-xl transition cursor-pointer ${
-                      !selectedCategoryId ? "bg-sand text-deep-green font-bold" : "text-ink hover:bg-warm-white"
-                    }`}
-                  >
-                    <span>{lang === "sw" ? "Zote (All)" : "All Categories"}</span>
-                    {!selectedCategoryId && <Check size={13} className="text-deep-green" />}
-                  </button>
-
-                  {allCategories.map((c) => {
-                    const isSelected = selectedCategoryId === c.id;
-                    return (
-                      <button
-                        key={c.id}
-                        onClick={() => {
-                          setSelectedCategoryId(c.id);
-                          setActiveFilter("category");
-                          setCategoryDropdownOpen(false);
-                        }}
-                        className={`flex w-full items-center justify-between px-3 py-2 text-left text-xs font-semibold rounded-xl transition cursor-pointer ${
-                          isSelected ? "bg-sand text-deep-green font-bold" : "text-ink hover:bg-warm-white"
-                        }`}
-                      >
-                        <span>{pick(lang, c.nameSw, c.name)}</span>
-                        {isSelected && <Check size={13} className="text-deep-green" />}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+            <button
+              type="button"
+              aria-expanded={categoryDropdownOpen}
+              aria-haspopup="listbox"
+              onClick={() => {
+                setActiveFilter("category");
+                setCategoryDropdownOpen((open) => !open);
+              }}
+              className={`flex flex-shrink-0 items-center gap-1 rounded-full px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold transition cursor-pointer ${
+                activeFilter === "category" || selectedCategoryId
+                  ? "bg-gold text-deep-green shadow-sm"
+                  : "bg-sand text-ink hover:bg-[#e6dcb9]"
+              }`}
+            >
+              <span>
+                {selectedCategory
+                  ? pick(lang, selectedCategory.nameSw, selectedCategory.name)
+                  : lang === "sw"
+                    ? "Aina"
+                    : "Category"}
+              </span>
+              <ChevronDown
+                size={12}
+                className={`transition-transform ${categoryDropdownOpen ? "rotate-180" : ""}`}
+              />
+            </button>
           </div>
+
+          {categoryDropdownOpen && (
+            <div className="mt-2 rounded-2xl border border-line bg-white p-2.5 shadow-lg">
+              <Link
+                to="/categories"
+                onClick={() => setCategoryDropdownOpen(false)}
+                className="mb-2 flex items-center gap-2 rounded-xl bg-deep-green px-3 py-2.5 text-warm-white"
+              >
+                <Grid2x2 size={14} className="text-gold-light shrink-0" />
+                <span className="text-[12px] font-bold">
+                  {lang === "sw" ? "Fungua ukurasa wa Aina" : "Open Categories page"}
+                </span>
+              </Link>
+
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedCategoryId(null);
+                    setActiveFilter("popular");
+                    setCategoryDropdownOpen(false);
+                  }}
+                  className={`rounded-full px-3 py-1.5 text-[11px] font-bold transition cursor-pointer ${
+                    !selectedCategoryId
+                      ? "bg-gold text-deep-green"
+                      : "bg-sand text-ink hover:bg-[#e6dcb9]"
+                  }`}
+                >
+                  {lang === "sw" ? "Zote" : "All"}
+                </button>
+                {allCategories.map((c) => {
+                  const isSelected = selectedCategoryId === c.id;
+                  return (
+                    <button
+                      type="button"
+                      key={c.id}
+                      onClick={() => {
+                        setSelectedCategoryId(c.id);
+                        setActiveFilter("category");
+                        setCategoryDropdownOpen(false);
+                      }}
+                      className={`rounded-full px-3 py-1.5 text-[11px] font-bold transition cursor-pointer ${
+                        isSelected
+                          ? "bg-gold text-deep-green"
+                          : "bg-sand text-ink hover:bg-[#e6dcb9]"
+                      }`}
+                    >
+                      {pick(lang, c.nameSw, c.name)}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
