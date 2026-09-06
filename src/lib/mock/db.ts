@@ -1,4 +1,12 @@
-import { api, getToken } from "../api/client";
+import { api, getToken, mediaUrl } from "../api/client";
+
+function withHost<T extends Record<string, any>>(row: T, keys: string[]): T {
+  const next = { ...row };
+  for (const key of keys) {
+    if (typeof next[key] === "string" && next[key]) next[key] = mediaUrl(next[key]);
+  }
+  return next;
+}
 import type {
   AppNotification,
   Category,
@@ -117,9 +125,9 @@ export function subscribeDb(fn: () => void) {
 
 export async function hydrate() {
   const data = await api<any>("/api/bootstrap");
-  store.categories = data.categories || [];
-  store.series = data.series || [];
-  store.episodes = data.episodes || [];
+  store.categories = (data.categories || []).map((c: Category) => withHost(c, ["image"]));
+  store.series = (data.series || []).map((s: Series) => withHost(s, ["image", "backdropImage"]));
+  store.episodes = (data.episodes || []).map((e: Episode) => withHost(e, ["mediaUrl", "posterUrl"]));
   if (Array.isArray(data.comments)) {
     store.comments = data.comments;
   }

@@ -1,5 +1,13 @@
 const TOKEN_KEY = "qisas.token";
 export const AUTH_LOST_EVENT = "qisas:auth-lost";
+const PRODUCTION_API = "https://qisass-production.up.railway.app";
+
+export function apiBase(): string {
+  const fromEnv = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "");
+  if (fromEnv) return fromEnv;
+  if (import.meta.env.DEV) return "";
+  return PRODUCTION_API;
+}
 
 export function getToken(): string | null {
   try {
@@ -19,7 +27,15 @@ export function setToken(token: string | null) {
 }
 
 export function apiUrl(path: string): string {
-  const base = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") || "";
+  const base = apiBase();
+  return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+export function mediaUrl(path?: string | null): string {
+  if (!path) return "";
+  if (/^(https?:|data:|blob:)/i.test(path)) return path;
+  const base = apiBase();
+  if (!base) return path;
   return `${base}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
