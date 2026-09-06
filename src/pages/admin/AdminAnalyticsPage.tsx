@@ -220,8 +220,10 @@ export default function AdminAnalyticsPage() {
                   <YAxis yAxisId="right" orientation="right" stroke="#888" fontSize={10} tickFormatter={(v) => `${v / 1000}k`} />
                   <Tooltip
                     contentStyle={TIP}
-                    formatter={(val: any, name: string) =>
-                      name === "Revenue TZS" ? [Number(val).toLocaleString() + " TZS", name] : [val, name]
+                    formatter={(val, name) =>
+                      String(name) === "Revenue TZS"
+                        ? [Number(val).toLocaleString() + " TZS", "Revenue TZS"]
+                        : [val, String(name ?? "")]
                     }
                   />
                   <Legend wrapperStyle={{ fontSize: "11px" }} />
