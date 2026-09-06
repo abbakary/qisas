@@ -1,12 +1,4 @@
 import { api, getToken, mediaUrl } from "../api/client";
-
-function withHost<T extends Record<string, any>>(row: T, keys: string[]): T {
-  const next = { ...row };
-  for (const key of keys) {
-    if (typeof next[key] === "string" && next[key]) next[key] = mediaUrl(next[key]);
-  }
-  return next;
-}
 import type {
   AppNotification,
   Category,
@@ -44,6 +36,15 @@ export type {
   Progress,
   Favorite,
 };
+
+function withHost<T>(row: T, keys: string[]): T {
+  const next: Record<string, unknown> = { ...(row as Record<string, unknown>) };
+  for (const key of keys) {
+    const value = next[key];
+    if (typeof value === "string" && value) next[key] = mediaUrl(value);
+  }
+  return next as T;
+}
 
 export type Store = {
   categories: Category[];
