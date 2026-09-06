@@ -10,7 +10,7 @@ type AuthCtx = {
   loginWithPhone: (phone: string, password: string, otpTicket?: string) => Promise<{ ok: boolean; error?: string }>;
   register: (name: string, emailOrPhone: string, password: string, language?: string) => Promise<{ ok: boolean; error?: string }>;
   registerWithPhone: (name: string, phone: string, password: string, language?: string, otpTicket?: string) => Promise<{ ok: boolean; error?: string }>;
-  checkPhoneExists: (phone: string) => Promise<{ exists: boolean; user?: { id: string; name: string; phone: string; role: Role } }>;
+  checkPhoneExists: (phone: string) => Promise<{ exists: boolean; error?: string; user?: { id: string; name: string; phone: string; role: Role } }>;
   sendOtp: (phone: string) => Promise<{ ok: boolean; challengeId?: string; resendIn?: number; devAcceptAny?: boolean; error?: string }>;
   verifyOtp: (phone: string, code: string, challengeId?: string) => Promise<{ ok: boolean; otpTicket?: string; error?: string }>;
   logout: () => void;
@@ -76,8 +76,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         method: "POST",
         body: JSON.stringify({ phone: phoneInput.trim() }),
       });
-    } catch {
-      return { exists: false };
+    } catch (err: any) {
+      return { exists: false, error: err?.message || "Cannot reach the server." };
     }
   }, []);
 

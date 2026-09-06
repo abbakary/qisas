@@ -5,7 +5,12 @@ const PRODUCTION_API = "https://qisass-production.up.railway.app";
 export function apiBase(): string {
   const fromEnv = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "");
   if (fromEnv) return fromEnv;
-  if (import.meta.env.DEV) return "";
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    if (host === "localhost" || host === "127.0.0.1") return "";
+  } else if (import.meta.env.DEV) {
+    return "";
+  }
   return PRODUCTION_API;
 }
 

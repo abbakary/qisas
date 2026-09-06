@@ -86,6 +86,15 @@ export default function AuthFlow({ initialStep = "IDENTIFIER_CHECK", defaultPhon
     const check = await checkPhoneExists(clean);
     setBusy(false);
 
+    if (check.error) {
+      setError(
+        lang === "sw"
+          ? "Imeshindikana kuungana na seva. Jaribu tena."
+          : "Could not reach the server. Try again."
+      );
+      return;
+    }
+
     if (check.exists && check.user) {
       setMatchedUser({ name: check.user.name, phone: check.user.phone });
       setStep("PASSWORD_LOGIN");
