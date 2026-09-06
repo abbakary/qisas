@@ -63,7 +63,7 @@ function canvasToJpeg(canvas: HTMLCanvasElement, quality = 0.72): Promise<Blob> 
 function grabOneFrame(video: HTMLVideoElement): Promise<Blob> {
   return new Promise((resolve, reject) => {
     let settled = false;
-    const timer = window.setTimeout(() => finish(new Error("timeout")), 4000);
+    const timer = window.setTimeout(() => finish(new Error("timeout")), 1500);
 
     const finish = (err?: Error, blob?: Blob) => {
       if (settled) return;
@@ -94,16 +94,9 @@ function grabOneFrame(video: HTMLVideoElement): Promise<Blob> {
       }
     };
 
-    const seek = () => {
-      const d = Number.isFinite(video.duration) && video.duration > 0.3 ? video.duration : 2;
-      video.currentTime = Math.min(1, Math.max(0.4, d * 0.12));
-    };
-
-    video.addEventListener("seeked", snap, { once: true });
+    video.addEventListener("loadeddata", snap, { once: true });
     video.addEventListener("error", () => finish(new Error("Could not read video")), { once: true });
-
-    if (video.readyState >= 1) seek();
-    else video.addEventListener("loadedmetadata", seek, { once: true });
+    if (video.readyState >= 2) snap();
   });
 }
 

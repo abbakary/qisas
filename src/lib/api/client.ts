@@ -84,3 +84,56 @@ export async function api<T = any>(path: string, init: RequestInit = {}): Promis
   if (res.status === 204) return undefined as T;
   return res.json();
 }
+
+export function uploadForm<T = any>(
+  path: string,
+  form: FormData,
+  onProgress?: (pct: number) => void,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", apiUrl(path));
+    const token = getToken();
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && onProgress) {
+        onProgress(Math.min(99, Math.round((event.loaded / event.total) * 100)));
+      }
+    };
+    xhr.onload = () => {
+      const status = xhr.status;
+      if (status === 401 && token) {
+        setToken(null);
+        try {
+          window.dispatchEvent(new Event(AUTH_LOST_EVENT));
+        } catch {
+          /* ignore */
+        }
+      }
+      if (status < 200 || status >= 300) {
+        let detail = xhr.statusText || "Upload failed";
+        try {
+          const data = JSON.parse(xhr.responseText);
+          detail = data.detail || data.message || detail;
+          if (Array.isArray(detail)) detail = detail.map((d: any) => d.msg || d).join("; ");
+        } catch {
+          /* ignore */
+        }
+        reject(new ApiError(status, String(detail)));
+        return;
+      }
+      onProgress?.(100);
+      if (status === 204 || !xhr.responseText) {
+        resolve(undefined as T);
+        return;
+      }
+      try {
+        resolve(JSON.parse(xhr.responseText) as T);
+      } catch (err) {
+        reject(err);
+      }
+    };
+    xhr.onerror = () => reject(new ApiError(0, "Upload failed. Check your connection."));
+    xhr.send(form);
+  });
+}

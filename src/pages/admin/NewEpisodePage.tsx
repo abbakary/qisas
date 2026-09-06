@@ -132,7 +132,7 @@ export default function NewEpisodePage() {
       return;
     }
 
-    setProgress(35);
+    setProgress(0);
     try {
       const warnings: string[] = [];
       if (durCheck && !durCheck.ok && durCheck.message) warnings.push(durCheck.message);
@@ -149,6 +149,7 @@ export default function NewEpisodePage() {
         file: source === "file" ? file : null,
         mediaUrl: source === "url" ? mediaUrl.trim() : "",
         poster: posterFileRef.current,
+        onProgress: setProgress,
       });
 
       setProgress(100);

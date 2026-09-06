@@ -1,4 +1,4 @@
-import { api, getToken, mediaUrl } from "../api/client";
+import { api, getToken, mediaUrl, uploadForm } from "../api/client";
 import type {
   AppNotification,
   Category,
@@ -497,6 +497,7 @@ export const db = {
       file?: File | null;
       poster?: File | null;
       mediaUrl?: string;
+      onProgress?: (pct: number) => void;
     }) {
       const form = new FormData();
       form.append("seriesId", data.seriesId);
@@ -512,7 +513,7 @@ export const db = {
       form.append("mediaUrl", data.mediaUrl || "");
       if (data.file) form.append("file", data.file);
       if (data.poster) form.append("poster", data.poster);
-      const created = await api<Episode>("/api/episodes/upload", { method: "POST", body: form });
+      const created = await uploadForm<Episode>("/api/episodes/upload", form, data.onProgress);
       store.episodes.push(created);
       notify();
       return created;
