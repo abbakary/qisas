@@ -166,7 +166,7 @@ export default function AuthFlow({ initialStep = "IDENTIFIER_CHECK", defaultPhon
     }
 
     setBusy(true);
-    const res = await loginWithPhone(phone, password, otpTicket);
+    const res = await loginWithPhone(phone, password);
     setBusy(false);
 
     if (!res.ok) {
@@ -220,13 +220,41 @@ export default function AuthFlow({ initialStep = "IDENTIFIER_CHECK", defaultPhon
     }
 
     setBusy(true);
-    const res = await registerWithPhone(fullName, phone, password, lang, otpTicket);
-    setBusy(false);
-
+    const res = await registerWithPhone(fullName, phone, password, lang);
     if (!res.ok) {
+      const msg = (res.error || "").toLowerCase();
+      const alreadyHasAccount =
+        msg.includes("already registered") ||
+        msg.includes("already exists") ||
+        msg.includes("verify your phone");
+      if (alreadyHasAccount) {
+        const signedIn = await loginWithPhone(phone, password);
+        setBusy(false);
+        if (signedIn.ok) {
+          setSuccessToast(
+            lang === "sw"
+              ? `Karibu tena, ${fullName}!`
+              : `Welcome back, ${fullName}!`
+          );
+          setTimeout(() => {
+            navigate(callbackUrl, { replace: true });
+          }, 600);
+          return;
+        }
+        setMatchedUser({ name: fullName, phone });
+        setStep("PASSWORD_LOGIN");
+        setError(
+          lang === "sw"
+            ? "Nambari hii ina akaunti. Weka nywila yako kuingia."
+            : "This number already has an account. Sign in with your password."
+        );
+        return;
+      }
+      setBusy(false);
       setError(res.error || (lang === "sw" ? "Hitilafu imetokea wakati wa usajili." : "Registration failed."));
       return;
     }
+    setBusy(false);
 
     // Success!
     setSuccessToast(

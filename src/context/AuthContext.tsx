@@ -109,7 +109,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const res = await api<{ token: string; user: SessionUser }>("/api/auth/login", {
           method: "POST",
-          body: JSON.stringify({ phone: phoneInput.trim(), password: passwordInput, otpTicket }),
+          body: JSON.stringify({
+            phone: phoneInput.trim(),
+            password: passwordInput,
+            ...(otpTicket ? { otpTicket } : {}),
+          }),
         });
         setToken(res.token);
         saveUser(res.user);
@@ -156,7 +160,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             phone: normalizePhone(phoneInput),
             password: passwordInput,
             language,
-            otpTicket,
+            ...(otpTicket ? { otpTicket } : {}),
           }),
         });
         setToken(res.token);
