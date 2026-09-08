@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { episodeCoverDataUrl } from "../lib/media/episode-cover";
 
 export default function EpisodeCover({
@@ -22,14 +22,20 @@ export default function EpisodeCover({
     () => episodeCoverDataUrl({ order, title, seriesTitle }),
     [order, title, seriesTitle],
   );
+  const [broken, setBroken] = useState(false);
+  useEffect(() => {
+    setBroken(false);
+  }, [src]);
+  const showSrc = Boolean(src) && !broken;
 
   return (
     <img
-      src={src || fallback}
+      src={showSrc ? src! : fallback}
       alt={alt}
       className={className}
       loading="lazy"
       decoding="async"
+      onError={() => setBroken(true)}
     />
   );
 }

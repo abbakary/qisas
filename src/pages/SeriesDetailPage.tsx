@@ -1,5 +1,5 @@
-﻿import React, { useState, useEffect, useMemo } from "react";
-import { useParams, useNavigate, useLocation } from "react-router-dom";
+﻿import React, { useState, useEffect, useMemo, useRef } from "react";
+import { useParams, useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { useLang, pick } from "../context/LanguageContext";
 import { useAuth } from "../context/AuthContext";
 import { gradientFor } from "../lib/gradients";
@@ -10,6 +10,7 @@ import UnlockCheckoutModal, { type CheckoutMode } from "../components/UnlockChec
 import ShareModal from "../components/ShareModal";
 import MediaPlayer from "../components/MediaPlayer";
 import EpisodeCover from "../components/EpisodeCover";
+import { episodeCoverDataUrl } from "../lib/media/episode-cover";
 import {
   Play,
   Share2,
@@ -34,6 +35,7 @@ export default function SeriesDetailPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [dbVersion, setDbVersion] = useState(0);
 
   // User interactions state
@@ -55,6 +57,7 @@ export default function SeriesDetailPage() {
   const [activeEpisodeId, setActiveEpisodeId] = useState<string | null>(null);
   const [checkout, setCheckout] = useState<{ mode: CheckoutMode; amountTzs: number } | null>(null);
   const [sponsorPrompt, setSponsorPrompt] = useState(false);
+  const [pendingPlayId, setPendingPlayId] = useState<string | null>(null);
 
   useEffect(() => {
     return subscribeDb(() => setDbVersion((v) => v + 1));
@@ -109,7 +112,7 @@ export default function SeriesDetailPage() {
     return db.comments.findMany({ seriesId: series.id, parentId: commentId });
   }
 
-  /** Phone only for unlock, save, or posting — never for browse / play / read / like. */
+  /** Phone only for save or posting — unlock asks for it inside checkout. */
   function needPhone() {
     navigate(`/login?callbackUrl=${encodeURIComponent(location.pathname)}`);
   }
@@ -121,13 +124,53 @@ export default function SeriesDetailPage() {
   const episodeCount = rawEpisodes.length;
   const unlockPrice = seriesUnlockPrice(series, episodeCount);
   const playOpts = { series, unlocks, storyOfWeekId };
+  const starter = db.monetize.starterBundle();
+  const checkoutResumed = useRef(false);
+
+  useEffect(() => {
+    if (!series || checkoutResumed.current || owned || sow) return;
+    const want = searchParams.get("unlock");
+    let pendingMode: CheckoutMode = "unlock";
+    let match = want === "1" || want === "unlock" || want === "bundle";
+    try {
+      const raw = sessionStorage.getItem("qisas.pendingUnlock");
+      if (raw) {
+        const pending = JSON.parse(raw) as { seriesId?: string; mode?: CheckoutMode };
+        if (pending.seriesId === series.id) {
+          match = true;
+          if (pending.mode === "bundle" || pending.mode === "sponsor" || pending.mode === "unlock") {
+            pendingMode = pending.mode;
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    if (want === "bundle") pendingMode = "bundle";
+    if (!match) return;
+    checkoutResumed.current = true;
+    openPay(pendingMode);
+    if (searchParams.has("unlock")) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("unlock");
+      setSearchParams(next, { replace: true });
+    }
+  }, [series?.id, owned, sow, searchParams, setSearchParams]);
 
   function openPay(mode: CheckoutMode) {
-    if (!user) {
-      needPhone();
-      return;
+    if (!series) return;
+    try {
+      sessionStorage.setItem(
+        "qisas.pendingUnlock",
+        JSON.stringify({ seriesId: series.id, slug: series.slug, mode }),
+      );
+    } catch {
+      /* ignore */
     }
-    setCheckout({ mode, amountTzs: unlockPrice });
+    setCheckout({
+      mode,
+      amountTzs: mode === "bundle" ? starter?.amountTzs || 2000 : unlockPrice,
+    });
   }
 
   function toggleFav() {
@@ -245,6 +288,7 @@ export default function SeriesDetailPage() {
   function startPlayback(ep: Episode) {
     if (!series) return;
     if (!canPlayEpisode(ep, user, playOpts)) {
+      setPendingPlayId(ep.id);
       openPay("unlock");
       return;
     }
@@ -495,7 +539,14 @@ export default function SeriesDetailPage() {
                     episodeId={activeEp.id}
                     mediaUrl={activeEp.mediaUrl}
                     mediaType={activeEp.mediaType}
-                    poster={activeEp.posterUrl || undefined}
+                    poster={
+                      activeEp.posterUrl ||
+                      episodeCoverDataUrl({
+                        order: activeEp.order,
+                        title: pick(lang, activeEp.titleSw, activeEp.title),
+                        seriesTitle: pick(lang, series.titleSw, series.title),
+                      })
+                    }
                     initialPosition={resumePos}
                     autoPlay
                     onCompleted={() => {
@@ -930,14 +981,21 @@ export default function SeriesDetailPage() {
           seriesTitle={pick(lang, series.titleSw, series.title)}
           amountTzs={checkout.amountTzs}
           onClose={() => setCheckout(null)}
-          onSuccess={(mode) => {
-            if (mode === "unlock") {
-              const key = `qisas.sponsorPrompt.${user?.id}.${series.id}`;
+          onSuccess={(paidMode) => {
+            if (pendingPlayId && paidMode !== "sponsor") {
+              setActiveEpisodeId(pendingPlayId);
+            }
+            if (paidMode === "unlock" || paidMode === "bundle") {
+              const key = `qisas.sponsorPrompt.${user?.id || "me"}.${series.id}`;
               if (!sessionStorage.getItem(key)) {
                 sessionStorage.setItem(key, "1");
                 setCheckout(null);
                 setSponsorPrompt(true);
+              } else {
+                setCheckout(null);
               }
+            } else {
+              setCheckout(null);
             }
           }}
         />

@@ -137,6 +137,17 @@ export default function NewEpisodePage() {
       const warnings: string[] = [];
       if (durCheck && !durCheck.ok && durCheck.message) warnings.push(durCheck.message);
 
+      const poster =
+        posterFileRef.current ||
+        (await prepareEpisodePoster({
+          file: source === "file" ? file : null,
+          mediaType,
+          order: effectiveOrder,
+          title: titleSw || title || `Kipindi ${effectiveOrder}`,
+          seriesTitle: sel.titleSw || sel.title,
+        }));
+      posterFileRef.current = poster;
+
       const created = await db.episodes.createFromSource({
         seriesId: sel.id,
         order: effectiveOrder,
@@ -148,7 +159,7 @@ export default function NewEpisodePage() {
         published: true,
         file: source === "file" ? file : null,
         mediaUrl: source === "url" ? mediaUrl.trim() : "",
-        poster: posterFileRef.current,
+        poster,
         onProgress: setProgress,
       });
 

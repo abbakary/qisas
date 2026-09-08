@@ -57,7 +57,7 @@ export const dict: Dict = {
   minutes: { sw: "dakika", en: "min" },
   storyOfWeek: { sw: "Hadithi ya wiki", en: "Story of the week" },
   unlockForever: { sw: "Fungua milele", en: "Unlock forever" },
-  firstEpisodeFree: { sw: "Vipindi 3 vya kwanza ni bure daima", en: "The first 3 episodes are free forever" },
+  firstEpisodeFree: { sw: "Kipindi cha kwanza ni bure daima — vipindi 2 na 3 ni zawadi ya kuingia", en: "Episode 1 is free forever — 2 and 3 are the welcome gift" },
   ownedForever: { sw: "Umilikiwa milele", en: "Yours forever" },
   sponsorOthers: { sw: "Dhamini kwa wengine", en: "Sponsor this for others" },
   starterBundle: { sw: "Kifurushi cha kuanza", en: "Starter bundle" },

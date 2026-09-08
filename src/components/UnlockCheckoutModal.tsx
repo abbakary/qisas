@@ -30,27 +30,36 @@ export default function UnlockCheckoutModal({
   onSuccess,
 }: Props) {
   const { lang } = useLang();
-  const { user } = useAuth();
+  const { user, checkPhoneExists, loginWithPhone, registerWithPhone } = useAuth();
   const [method, setMethod] = useState<MobileMoneyMethod | "Card">("M-Pesa");
   const [phone, setPhone] = useState(user?.phone || "");
+  const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [newAccount, setNewAccount] = useState(false);
   const [anonymous, setAnonymous] = useState(true);
   const [target, setTarget] = useState("Watoto na wasikilizaji wa bure");
   const [phase, setPhase] = useState<"form" | "push" | "done" | "error">("form");
   const [error, setError] = useState<string | null>(null);
   const [refCode, setRefCode] = useState("");
+  const [localMode, setLocalMode] = useState<CheckoutMode>(mode);
+  const bundle = db.monetize.starterBundle();
+  const firstPurchase = db.unlocks.mine().filter((u) => u.kind !== "SPONSORED_GRANT").length === 0;
 
   useEffect(() => {
     if (open) {
       setPhase("form");
       setError(null);
+      setPassword("");
       setPhone(user?.phone || "");
+      setLocalMode(mode);
+      setNewAccount(false);
     }
-  }, [open, user?.phone]);
+  }, [open, user?.phone, mode]);
 
   if (!open) return null;
 
   const copy =
-    mode === "sponsor"
+    localMode === "sponsor"
       ? {
           kicker: "Sadaqah",
           title: lang === "sw" ? "Wape wengine pia" : "Share this blessing",
@@ -71,14 +80,14 @@ export default function UnlockCheckoutModal({
               ? `Thibitisha sadaqah (${method})`
               : `Confirm sadaqah (${method})`,
         }
-      : mode === "bundle"
+      : localMode === "bundle"
       ? {
           kicker: lang === "sw" ? "Anza kwa urahisi" : "A gentle start",
           title: lang === "sw" ? "Tatu kwa bei ya mbili" : "Three stories, price of two",
           body:
             lang === "sw"
-              ? "Vipindi 3 vya kila hadithi vimeshasikiliza bure. Hiki ni malipo ya mara moja — bila kuisha, bila kushinikiza."
-              : "You have already received three free episodes in each story. This is a single, unhurried payment — no expiry, no pressure.",
+              ? "Vipindi vya kwanza vimeshasikiliza bure. Hiki ni malipo ya mara moja — bila kuisha, bila kushinikiza."
+              : "You have already received the free opening episodes. This is a single payment — no expiry, no pressure.",
           done:
             lang === "sw"
               ? "Barakallah feek. Hadithi hizi ziko mikononi mwako."
@@ -97,8 +106,8 @@ export default function UnlockCheckoutModal({
           title: lang === "sw" ? "Endelea kwa utulivu" : "Continue in ease",
           body:
             lang === "sw"
-              ? "Asante kwa kusikiliza vipindi vitatu vya kwanza. Ukitaka yaliyobaki, lipa mara moja — hadithi inabaki kwako, bila kuisha."
-              : "Thank you for listening to the first three episodes. If you wish to continue, one payment keeps the rest with you — calmly, and for good.",
+              ? "Kipindi cha kwanza ni bure daima. Vipindi 2 na 3 ni zawadi ya kuingia. Ukitaka kutoka kipindi cha 4, lipa mara moja — hadithi inabaki kwako."
+              : "Episode 1 is free forever. Episodes 2 and 3 are the welcome gift. From episode 4, one payment keeps the rest with you."
           done:
             lang === "sw"
               ? "Barakallah feek. Hadithi iko mikononi mwako."
@@ -113,12 +122,59 @@ export default function UnlockCheckoutModal({
               : `Confirm with ${method}`,
         };
 
+  async function ensureSession() {
+    if (user) return true;
+    const clean = phone.trim();
+    if (clean.length < 8) {
+      setError(lang === "sw" ? "Weka namba ya simu kuendelea." : "Enter your phone number to continue.");
+      return false;
+    }
+    if (password.length < 6) {
+      setError(
+        lang === "sw"
+          ? "Weka nywila (angalau herufi 6) — tunaiomba tu wakati wa kufungua."
+          : "Enter a password (at least 6 characters) — we only ask at unlock.",
+      );
+      return false;
+    }
+    const check = await checkPhoneExists(clean);
+    if (check.error) {
+      setError(check.error);
+      return false;
+    }
+    if (check.exists) {
+      const res = await loginWithPhone(clean, password);
+      if (!res.ok) {
+        setError(res.error || (lang === "sw" ? "Nywila si sahihi." : "Incorrect password."));
+        setNewAccount(false);
+        return false;
+      }
+      return true;
+    }
+    const res = await registerWithPhone(
+      (fullName || "Msikilizaji").trim(),
+      clean,
+      password,
+      lang,
+    );
+    if (!res.ok) {
+      setError(res.error || (lang === "sw" ? "Imeshindikana kufungua akaunti." : "Could not create account."));
+      setNewAccount(true);
+      return false;
+    }
+    return true;
+  }
+
   async function pay() {
     setError(null);
     setPhase("push");
-    await new Promise((r) => setTimeout(r, 1600));
     try {
-      if (mode === "sponsor") {
+      const ok = await ensureSession();
+      if (!ok) {
+        setPhase("form");
+        return;
+      }
+      if (localMode === "sponsor") {
         if (!seriesId) throw new Error("Missing series");
         const gift = await db.sponsorships.create({
           seriesId,
@@ -130,14 +186,19 @@ export default function UnlockCheckoutModal({
       } else {
         const res = await db.unlocks.request({
           seriesId,
-          kind: mode === "bundle" ? "BUNDLE" : "PURCHASE",
+          kind: localMode === "bundle" ? "BUNDLE" : "PURCHASE",
           paymentMethod: method,
           phone,
         });
         setRefCode(res.unlocks[0]?.referenceCode || "");
       }
+      try {
+        sessionStorage.removeItem("qisas.pendingUnlock");
+      } catch {
+        /* ignore */
+      }
       setPhase("done");
-      onSuccess?.(mode);
+      onSuccess?.(localMode);
     } catch (err: any) {
       setError(err?.message || (lang === "sw" ? "Tafadhali jaribu tena, kwa utulivu." : "Please try again when you are ready."));
       setPhase("error");
@@ -168,9 +229,11 @@ export default function UnlockCheckoutModal({
             </button>
           </div>
           <div className="mt-4 inline-flex items-baseline gap-2 rounded-full bg-gold/95 px-3.5 py-1.5 text-deep-green">
-            <span className="text-sm font-black">{formatTzs(amountTzs)}</span>
+            <span className="text-sm font-black">
+              {formatTzs(localMode === "bundle" ? bundle?.amountTzs || 2000 : amountTzs)}
+            </span>
             <span className="text-[11px] font-semibold opacity-80">
-              {mode === "bundle"
+              {localMode === "bundle"
                 ? lang === "sw"
                   ? "mara moja"
                   : "one time"
@@ -256,7 +319,89 @@ export default function UnlockCheckoutModal({
                 </label>
               )}
 
-              {mode === "sponsor" && (
+              {!user && (
+                <div className="space-y-2 rounded-2xl border border-gold/30 bg-gold/5 p-3">
+                  <p className="text-[11px] text-muted leading-relaxed">
+                    {lang === "sw"
+                      ? "Simu inaombwa tu unapotaka kufungua. Unaweza kuvinjari bila kuingia."
+                      : "We only ask for your phone when you unlock. Browsing stays open."}
+                  </p>
+                  {method === "Card" && (
+                    <label className="block">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">
+                        {lang === "sw" ? "Namba ya simu" : "Phone number"}
+                      </span>
+                      <input
+                        className="field-box mt-1"
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        placeholder="0712 345 678"
+                      />
+                    </label>
+                  )}
+                  {newAccount && (
+                    <label className="block">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">
+                        {lang === "sw" ? "Jina" : "Name"}
+                      </span>
+                      <input
+                        className="field-box mt-1"
+                        value={fullName}
+                        onChange={(e) => setFullName(e.target.value)}
+                        placeholder={lang === "sw" ? "Jina lako" : "Your name"}
+                      />
+                    </label>
+                  )}
+                  <label className="block">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">
+                      {lang === "sw" ? "Nywila" : "Password"}
+                    </span>
+                    <input
+                      type="password"
+                      className="field-box mt-1"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder={lang === "sw" ? "Angalau herufi 6" : "At least 6 characters"}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setNewAccount((v) => !v)}
+                    className="text-[11px] font-bold text-deep-green hover:underline"
+                  >
+                    {newAccount
+                      ? lang === "sw"
+                        ? "Nina akaunti tayari"
+                        : "I already have an account"
+                      : lang === "sw"
+                        ? "Ni mara yangu ya kwanza — unda akaunti"
+                        : "First time — create an account"}
+                  </button>
+                </div>
+              )}
+
+              {firstPurchase && localMode !== "sponsor" && (
+                <button
+                  type="button"
+                  onClick={() => setLocalMode(localMode === "bundle" ? "unlock" : "bundle")}
+                  className={`w-full rounded-xl border px-3 py-2.5 text-left text-[12px] ${
+                    localMode === "bundle"
+                      ? "border-gold bg-gold/15 text-deep-green"
+                      : "border-line bg-white text-ink"
+                  }`}
+                >
+                  <span className="font-bold">
+                    {lang === "sw" ? "Kifurushi cha kuanza" : "Starter bundle"}
+                  </span>
+                  <span className="block text-[11px] text-muted">
+                    {lang === "sw"
+                      ? `Hadithi 3 kwa bei ya 2 — ${formatTzs(bundle?.amountTzs || 2000)}, mara moja.`
+                      : `3 stories for the price of 2 — ${formatTzs(bundle?.amountTzs || 2000)}, once.`}
+                  </span>
+                </button>
+              )}
+
+              {localMode === "sponsor" && (
                 <>
                   <label className="block">
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">
@@ -291,7 +436,7 @@ export default function UnlockCheckoutModal({
               {error && <p className="text-xs text-red-700 bg-red-50 rounded-xl p-2.5">{error}</p>}
 
               <button type="button" onClick={pay} className="btn-primary w-full flex items-center justify-center gap-2">
-                {mode === "sponsor" ? <HeartHandshake size={16} /> : <Smartphone size={16} />}
+                {localMode === "sponsor" ? <HeartHandshake size={16} /> : <Smartphone size={16} />}
                 {copy.cta}
               </button>
               <p className="text-[11px] text-center text-muted leading-relaxed">

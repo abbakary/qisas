@@ -40,15 +40,7 @@ export default function SubscribePage() {
     });
   }, [published, focusId]);
 
-  function needPhone(next: string) {
-    navigate(`/login?callbackUrl=${encodeURIComponent(next)}`);
-  }
-
   function openCheckout(mode: CheckoutMode, series?: Series, amount?: number) {
-    if (!user) {
-      needPhone(window.location.pathname + window.location.search);
-      return;
-    }
     const count = series ? db.episodes.findBySeries(series.id).length : 0;
     setCheckout({
       mode,

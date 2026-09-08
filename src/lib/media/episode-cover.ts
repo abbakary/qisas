@@ -106,7 +106,7 @@ export function captureVideoPoster(file: File): Promise<Blob> {
     const video = document.createElement("video");
     video.muted = true;
     video.playsInline = true;
-    video.preload = "metadata";
+    video.preload = "auto";
     video.src = objectUrl;
     grabOneFrame(video)
       .then(resolve)
@@ -125,20 +125,24 @@ export async function prepareEpisodePoster(opts: {
   order: number;
   title: string;
   seriesTitle?: string;
-}): Promise<File | null> {
-  const isVideoFile = Boolean(opts.file && (opts.file.type.startsWith("video") || opts.mediaType === "VIDEO"));
-  if (opts.file && isVideoFile) {
-    const blob = await captureVideoPoster(opts.file);
-    return new File([blob], "poster.jpg", { type: "image/jpeg" });
-  }
-  if (opts.mediaType === "VIDEO") return null;
-  return dataUrlToFile(
+}): Promise<File> {
+  const fallback = dataUrlToFile(
     episodeCoverDataUrl({
       order: opts.order,
       title: opts.title,
       seriesTitle: opts.seriesTitle,
     }),
   );
+  const isVideoFile = Boolean(opts.file && (opts.file.type.startsWith("video") || opts.mediaType === "VIDEO"));
+  if (opts.file && isVideoFile) {
+    try {
+      const blob = await captureVideoPoster(opts.file);
+      if (blob && blob.size > 800) return new File([blob], "poster.jpg", { type: "image/jpeg" });
+    } catch {
+      /* canvas art is better than a missing cover */
+    }
+  }
+  return fallback;
 }
 
 export function dataUrlToFile(dataUrl: string, name = "poster.jpg"): File {
